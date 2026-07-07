@@ -63,9 +63,9 @@ SdlRenderer::SdlRenderer(const Config& config)
         );
     }
 
-    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), 34);   // v0.3.4: +5% over v0.3.3
+    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), 30);   // v0.3.5: adjusted
     tempoFont_ = TTF_OpenFont(config_.fontPath.c_str(), 110);
-    bottomFont_ = TTF_OpenFont(config_.fontPath.c_str(), 26);
+    bottomFont_ = TTF_OpenFont(config_.fontPath.c_str(), 25);  // v0.3.5: adjusted
 
     require(statusFont_ != nullptr, std::string("TTF_OpenFont status failed: ") + TTF_GetError());
     require(tempoFont_ != nullptr, std::string("TTF_OpenFont tempo failed: ") + TTF_GetError());
@@ -172,13 +172,19 @@ void SdlRenderer::render(const LinkDisplayState& state)
     SDL_RenderFillRect(renderer_, &topBand);
     SDL_RenderFillRect(renderer_, &bottomBand);
 
-    const SDL_Color white {245, 245, 245, 255};
-    const SDL_Color soft {210, 210, 210, 255};
-    const SDL_Color blue {80, 140, 255, 255};
+    const SDL_Color statusNoPeers {40, 44, 48, 255};
+    const SDL_Color statusConnected {75, 85, 95, 255};
+    const SDL_Color tempoColor {64, 79, 96, 255};
+    const SDL_Color phaseBarColor {83, 114, 151, 255};
+    const SDL_Color phaseTextColor {75, 85, 95, 255};
 
-    renderCenteredText(DisplayText::formatStatusLine(state), statusFont_, topBand, soft);
-    renderCenteredText(DisplayText::formatTempoLine(state), tempoFont_, centerBand, white);
-    renderBottomBeatAndPhaseBar(state, bottomBand, soft, blue);
+    const SDL_Color statusColor = (state.linkEnabled && state.remotePeers > 0)
+        ? statusConnected
+        : statusNoPeers;
+
+    renderCenteredText(DisplayText::formatStatusLine(state), statusFont_, topBand, statusColor);
+    renderCenteredText(DisplayText::formatTempoLine(state), tempoFont_, centerBand, tempoColor);
+    renderBottomBeatAndPhaseBar(state, bottomBand, phaseTextColor, phaseBarColor);
 
     SDL_RenderPresent(renderer_);
 }
