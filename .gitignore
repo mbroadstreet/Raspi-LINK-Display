@@ -1,0 +1,21 @@
+# Build
+build/
+*.o
+*.obj
+*.exe
+*.dll
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Third-party (user must populate)
+third_party/link/
+
+# Fonts (not bundled)
+*.ttf
+*.otf
