@@ -118,3 +118,7 @@ Optional configuration:
 - Fullscreen mode uses `SDL_WINDOW_FULLSCREEN_DESKTOP`, so the app is designed for a 480x320 display but does not force a hardware mode to 480x320 in every environment.
 - The renderer does not request vsync; the main loop uses explicit frame pacing for roughly 30 FPS.
 - No font files are bundled. Install a system font or pass `--font PATH`.
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
