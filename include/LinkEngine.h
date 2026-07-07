@@ -1,19 +1,17 @@
 #pragma once
-#include <ableton/Link.hpp>
-#include <string>
 
-class LinkEngine {
+#include "LinkDisplayState.h"
+
+#include <ableton/Link.hpp>
+
+class LinkEngine
+{
 public:
-    LinkEngine(double tempo = 120.0, double quantum = 4.0);
-    void enable(bool on);
-    bool isEnabled() const;
-    int numPeers() const;
-    double tempo() const;
-    double beat() const;
-    double phase() const;
-    double quantum() const;
+    LinkEngine(double initialTempo, double quantum);
+
+    LinkDisplayState snapshot() const;
 
 private:
-    ableton::Link link;
-    double mQuantum;
+    ableton::Link link_;
+    double quantum_ = 4.0;
 };

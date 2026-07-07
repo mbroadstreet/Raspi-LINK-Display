@@ -1,9 +1,16 @@
 # Build
 build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
 *.o
 *.obj
 *.exe
 *.dll
+*.so
+*.dylib
 
 # IDE / OS
 .vscode/
@@ -13,9 +20,10 @@ build/
 .DS_Store
 Thumbs.db
 
-# Third-party (user must populate)
-third_party/link/
+# Third-party Link should be added as a git submodule at third_party/link.
+# Do not ignore the submodule path itself.
+third_party/link/build/
 
-# Fonts (not bundled)
+# Fonts are intentionally not bundled
 *.ttf
 *.otf

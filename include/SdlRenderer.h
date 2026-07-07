@@ -1,17 +1,32 @@
 #pragma once
+
+#include "Config.h"
+#include "LinkDisplayState.h"
+
+#include <SDL.h>
+#include <SDL_ttf.h>
+
 #include <string>
 
-class SdlRenderer {
+class SdlRenderer
+{
 public:
-    SdlRenderer(int width, int height, const std::string& fontPath);
+    explicit SdlRenderer(const Config& config);
     ~SdlRenderer();
-    void render(const std::string& status, const std::string& tempo, const std::string& beatPhase, bool windowed);
-    void present();
-    bool shouldQuit() const;
+
+    SdlRenderer(const SdlRenderer&) = delete;
+    SdlRenderer& operator=(const SdlRenderer&) = delete;
+
+    bool pollQuit();
+    void render(const LinkDisplayState& state);
+
 private:
-    // SDL handles (opaque in header for simplicity)
-    void* window;
-    void* renderer;
-    void* font;
-    bool quit;
+    void renderCenteredText(const std::string& text, TTF_Font* font, SDL_Rect area, SDL_Color color);
+
+    Config config_;
+    SDL_Window* window_ = nullptr;
+    SDL_Renderer* renderer_ = nullptr;
+    TTF_Font* statusFont_ = nullptr;
+    TTF_Font* tempoFont_ = nullptr;
+    TTF_Font* bottomFont_ = nullptr;
 };
