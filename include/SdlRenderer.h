@@ -22,6 +22,10 @@ public:
 
 private:
     void renderCenteredText(const std::string& text, TTF_Font* font, SDL_Rect area, SDL_Color color);
+    void renderBottomBeatAndPhaseBar(const LinkDisplayState& state,
+                                     const SDL_Rect& area,
+                                     SDL_Color textColor,
+                                     SDL_Color barColor);
 
     Config config_;
     SDL_Window* window_ = nullptr;

@@ -28,8 +28,6 @@ SdlRenderer::SdlRenderer(const Config& config)
     Uint32 windowFlags = SDL_WINDOW_SHOWN;
     if (config_.fullscreen)
     {
-        // Designed for a 480x320 display. FULLSCREEN_DESKTOP uses the current
-        // desktop/output size rather than forcing a hardware mode.
         windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
 
@@ -44,8 +42,6 @@ SdlRenderer::SdlRenderer(const Config& config)
 
     require(window_ != nullptr, std::string("SDL_CreateWindow failed: ") + SDL_GetError());
 
-    // Do not request renderer vsync here; the main loop uses explicit
-    // frame pacing so the two pacing methods are not combined.
     renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED);
 
     if (!renderer_)
@@ -150,29 +146,34 @@ void SdlRenderer::renderCenteredText(const std::string& text, TTF_Font* font, SD
     SDL_FreeSurface(surface);
 }
 
-void SdlRenderer::render(const LinkDisplayState& state)
+// v0.3 bottom band helper: integer beat on left, 4-segment blue phase bar on right
+void SdlRenderer::renderBottomBeatAndPhaseBar(const LinkDisplayState& state,
+                                              const SDL_Rect& area,
+                                              SDL_Color textColor,
+                                              SDL_Color barColor)
 {
-    int outputW = config_.width;
-    int outputH = config_.height;
-    SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
+    // Left side: integer beat
+    std::string beatText = "Beat " + std::to_string(static_cast<int>(state.beat));
+    renderCenteredText(beatText, bottomFont_, {area.x, area.y, area.w / 2, area.h}, textColor);
 
-    const SDL_Rect topBand {0, 0, outputW, 58};
-    const SDL_Rect centerBand {0, topBand.h, outputW, outputH - 116};
-    const SDL_Rect bottomBand {0, outputH - 58, outputW, 58};
+    // Right side: 4-segment phase bar
+    const int barHeight = 18;
+    const int barY = area.y + (area.h - barHeight) / 2;
+    const int barWidth = area.w / 2 - 30;
+    const int segmentWidth = barWidth / 4;
+    const int barX = area.x + area.w / 2 + 15;
 
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
-    SDL_RenderClear(renderer_);
+    // Draw 4 segments
+    SDL_SetRenderDrawColor(renderer_, barColor.r, barColor.g, barColor.b, barColor.a);
+    for (int i = 0; i < 4; ++i)
+    {
+        SDL_Rect seg {barX + i * segmentWidth + 2, barY, segmentWidth - 4, barHeight};
+        SDL_RenderFillRect(renderer_, &seg);
+    }
 
-    SDL_SetRenderDrawColor(renderer_, 18, 18, 18, 255);
-    SDL_RenderFillRect(renderer_, &topBand);
-    SDL_RenderFillRect(renderer_, &bottomBand);
-
-    const SDL_Color white {245, 245, 245, 255};
-    const SDL_Color soft {210, 210, 210, 255};
-
-    renderCenteredText(DisplayText::formatStatusLine(state), statusFont_, topBand, soft);
-    renderCenteredText(DisplayText::formatTempoLine(state), tempoFont_, centerBand, white);
-    renderCenteredText(DisplayText::formatBeatPhaseLine(state), bottomFont_, bottomBand, soft);
-
-    SDL_RenderPresent(renderer_);
+    // Phase position marker (white vertical line)
+    const double phaseNorm = state.phase / state.quantum; // 0.0 - 1.0
+    const int markerX = barX + static_cast<int>(phaseNorm * barWidth);
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
+    SDL_RenderDrawLine(renderer_, markerX, barY - 4, markerX, barY + barHeight + 4);
 }
