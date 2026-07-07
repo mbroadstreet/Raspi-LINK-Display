@@ -1,4 +1,4 @@
-# UI/Display Contract (v0.2 baseline)
+# UI/Display Contract (v0.3.4 baseline)
 
 This document describes the **display/GUI contract** separately from the runtime/API contract.
 
@@ -19,44 +19,47 @@ This document describes the **display/GUI contract** separately from the runtime
   - Colors, shapes, and visual elements
   - SDL2_ttf usage
 
-## Current v0.2 Display Layout (480×320)
+## Current v0.3.4 Display Layout (480×320)
 
-Three horizontal bands:
+Three horizontal bands with improved visual balance:
 
 ### Top band (status)
-- Height: ~58 px
-- Background: dark gray (#121212)
-- Text: status line
+- Enlarged centered Link status line
+- Slightly lower vertical position than v0.3.3
+- Status strings:
   - `LINK Inactive`
   - `LINK Active · No Peers`
   - `LINK Network Devices: N`
-- Color: soft white (#D2D2D2)
-- Font: 26 px
+- Peer count remains remote-peers-only
 
 ### Center band (tempo)
-- Height: remaining space minus top/bottom
-- Background: black
-- Large centered tempo value (exactly two decimals, no "BPM" suffix)
-- Color: white (#F5F5F5)
-- Font: 122 px
+- Large tempo with side padding
+- Exactly two decimal places
+- No BPM suffix
+- Remains the dominant visual element
 
-### Bottom band (beat + phase)
-- Height: ~58 px
-- Background: dark gray (#121212)
-- Left: beat text (`Beat X.X`)
-- Right: phase visualization (current v0.2 uses text `Phase Y.Y / 4`)
-- Color: soft white (#D2D2D2)
-- Font: 26 px
+### Bottom band (phase meter)
+- Phase-only 4-segment blue phase bar
+- No beat count
+- No numeric phase text
+- No bullet separator
+- Slightly narrower than v0.3.3 version
+- Visible white phase position marker
+- Marker moves smoothly through the 4-beat cycle
 
-## Rendering Rules
+## Future Visual/Theming Tickets (Documented but Not Implemented)
 
-- All text is centered within its band.
-- No font files are bundled.
-- Fullscreen uses `SDL_WINDOW_FULLSCREEN_DESKTOP`.
-- Explicit ~30 FPS frame pacing (no vsync + delay combination).
-- Quit via window close, Escape, or `q`.
+The following areas are expected to be explored in future tickets. They are **not** part of the current v0.3.4 implementation:
 
-## Scope for Future GUI Work
+- Warm grey tempo color
+- Top-line color choices
+- Adjusted lower phase meter shade
+- Alternate font exploration
+- Possible renderer cleanup to centralize theme values (colors, font sizes, padding, bar dimensions)
+
+These items should be treated as future work and should not be implemented unless a later ticket explicitly authorizes them.
+
+## Scope for GUI Work
 
 GUI-only changes are restricted to:
 - `DisplayText.*`

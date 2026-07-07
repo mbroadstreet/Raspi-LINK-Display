@@ -31,8 +31,6 @@ SdlRenderer::SdlRenderer(const Config& config)
     Uint32 windowFlags = SDL_WINDOW_SHOWN;
     if (config_.fullscreen)
     {
-        // Designed for a 480x320 display. FULLSCREEN_DESKTOP uses the current
-        // desktop/output size rather than forcing a hardware mode.
         windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
 
@@ -47,8 +45,6 @@ SdlRenderer::SdlRenderer(const Config& config)
 
     require(window_ != nullptr, std::string("SDL_CreateWindow failed: ") + SDL_GetError());
 
-    // Do not request renderer vsync here; the main loop uses explicit
-    // frame pacing so the two pacing methods are not combined.
     renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED);
 
     if (!renderer_)
@@ -67,8 +63,8 @@ SdlRenderer::SdlRenderer(const Config& config)
         );
     }
 
-    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), 26);
-    tempoFont_ = TTF_OpenFont(config_.fontPath.c_str(), 122);
+    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), 34);   // v0.3.4: +5% over v0.3.3
+    tempoFont_ = TTF_OpenFont(config_.fontPath.c_str(), 110);
     bottomFont_ = TTF_OpenFont(config_.fontPath.c_str(), 26);
 
     require(statusFont_ != nullptr, std::string("TTF_OpenFont status failed: ") + TTF_GetError());
@@ -159,9 +155,15 @@ void SdlRenderer::render(const LinkDisplayState& state)
     int outputH = config_.height;
     SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
 
-    const SDL_Rect topBand {0, 0, outputW, 58};
-    const SDL_Rect centerBand {0, topBand.h, outputW, outputH - 116};
-    const SDL_Rect bottomBand {0, outputH - 58, outputW, 58};
+    // v0.3.4: slightly lower top line + modest extra padding
+    const int topPadding = 18;
+    const int bottomPadding = 14;
+    const int topBandHeight = 46;
+    const int bottomBandHeight = 50;
+
+    const SDL_Rect topBand {0, topPadding, outputW, topBandHeight};
+    const SDL_Rect centerBand {0, topBand.y + topBand.h + 8, outputW, outputH - topBandHeight - bottomBandHeight - topPadding - bottomPadding - 16};
+    const SDL_Rect bottomBand {0, outputH - bottomBandHeight - bottomPadding, outputW, bottomBandHeight};
 
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
@@ -186,21 +188,14 @@ void SdlRenderer::renderBottomBeatAndPhaseBar(const LinkDisplayState& state,
                                               SDL_Color textColor,
                                               SDL_Color barColor)
 {
-    const auto beatNumber = static_cast<long long>(std::floor(state.beat));
-    const std::string beatText = "Beat " + std::to_string(beatNumber);
-
-    const int marginX = 10;
-    const int beatWidth = area.w / 2;
-    const SDL_Rect beatArea {area.x + marginX, area.y, beatWidth - marginX, area.h};
-    renderCenteredText(beatText, bottomFont_, beatArea, textColor);
-
-    const int barHeight = 18;
+    // v0.3.4: slightly narrower phase bar than v0.3.3
+    const int barHeight = 22;
     const int barY = area.y + (area.h - barHeight) / 2;
-    const int barX = area.x + beatWidth + 12;
-    const int barRightMargin = 14;
-    const int availableBarWidth = std::max(16, area.w - (barX - area.x) - barRightMargin);
-    const int segmentGap = 4;
-    const int segmentWidth = std::max(1, (availableBarWidth - (segmentGap * 3)) / 4);
+    const int margin = 24;   // increased for narrower bar
+    const int barWidth = area.w - (margin * 2);
+    const int barX = area.x + margin;
+    const int segmentGap = 6;
+    const int segmentWidth = std::max(5, (barWidth - (segmentGap * 3)) / 4);
     const int actualBarWidth = (segmentWidth * 4) + (segmentGap * 3);
 
     SDL_SetRenderDrawColor(renderer_, barColor.r, barColor.g, barColor.b, barColor.a);
