@@ -1,35 +1,26 @@
 #include "LinkEngine.h"
 
-LinkEngine::LinkEngine(double tempo, double quantum)
-    : link(tempo), mQuantum(quantum) {}
-
-void LinkEngine::enable(bool on) {
-    link.enable(on);
+LinkEngine::LinkEngine(double initialTempo, double quantum)
+    : link_(initialTempo)
+    , quantum_(quantum)
+{
+    link_.enable(true);
 }
 
-bool LinkEngine::isEnabled() const {
-    return link.isEnabled();
-}
+LinkDisplayState LinkEngine::snapshot() const
+{
+    LinkDisplayState out;
 
-int LinkEngine::numPeers() const {
-    return static_cast<int>(link.numPeers());
-}
+    // Keep SessionState snapshots short-lived and reacquire them during polling.
+    const auto sessionState = link_.captureAppSessionState();
+    const auto now = link_.clock().micros();
 
-double LinkEngine::tempo() const {
-    auto state = link.captureAppSessionState();
-    return state.tempo();
-}
+    out.linkEnabled = link_.isEnabled();
+    out.tempoBpm = sessionState.tempo();
+    out.remotePeers = link_.numPeers(); // Remote peers only; do not add this display.
+    out.beat = sessionState.beatAtTime(now, quantum_);
+    out.phase = sessionState.phaseAtTime(now, quantum_);
+    out.quantum = quantum_;
 
-double LinkEngine::beat() const {
-    auto state = link.captureAppSessionState();
-    return state.beatAtTime(link.clock().micros(), mQuantum);
-}
-
-double LinkEngine::phase() const {
-    auto state = link.captureAppSessionState();
-    return state.phaseAtTime(link.clock().micros(), mQuantum);
-}
-
-double LinkEngine::quantum() const {
-    return mQuantum;
+    return out;
 }

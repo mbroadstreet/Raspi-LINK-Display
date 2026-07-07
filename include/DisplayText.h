@@ -1,9 +1,12 @@
 #pragma once
+
+#include "LinkDisplayState.h"
+
 #include <string>
 
-class DisplayText {
-public:
-    static std::string statusLine(bool enabled, int peers);
-    static std::string tempoLine(double tempo);
-    static std::string beatPhaseLine(double beat, double phase, double quantum);
-};
+namespace DisplayText
+{
+    std::string formatStatusLine(const LinkDisplayState& state);
+    std::string formatTempoLine(const LinkDisplayState& state);
+    std::string formatBeatPhaseLine(const LinkDisplayState& state);
+}

@@ -1,0 +1,14 @@
+[Unit]
+Description=Ableton Link Pi Display
+After=graphical.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/link-pi-display
+Restart=on-failure
+RestartSec=2
+Environment=SDL_VIDEO_FULLSCREEN_DISPLAY=0
+
+[Install]
+WantedBy=graphical.target
