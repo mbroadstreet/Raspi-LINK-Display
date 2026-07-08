@@ -20,7 +20,6 @@ static RgbaColor parseRgba(const std::string& value, const std::string& key, con
 
     while (std::getline(iss, token, ','))
     {
-        // trim
         token.erase(0, token.find_first_not_of(" \t"));
         token.erase(token.find_last_not_of(" \t") + 1);
 
@@ -74,6 +73,88 @@ static bool parseBool(const std::string& value, const std::string& key, const st
               << " (expected true/false/yes/no/1/0/on/off) in " << path << ":" << lineNumber << "\n";
     std::exit(1);
     return false;
+}
+
+// --- Numeric helpers for config file (with file/line in errors) ---
+static int parsePositiveInt(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
+{
+    try {
+        int v = std::stoi(value);
+        if (v <= 0) {
+            std::cerr << "Error: " << key << " must be > 0: " << value << " in " << path << ":" << lineNumber << "\n";
+            std::exit(1);
+        }
+        return v;
+    } catch (...) {
+        std::cerr << "Error: " << key << " must be > 0: " << value << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+        return 0;
+    }
+}
+
+static int parseNonNegativeInt(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
+{
+    try {
+        int v = std::stoi(value);
+        if (v < 0) {
+            std::cerr << "Error: " << key << " must be >= 0: " << value << " in " << path << ":" << lineNumber << "\n";
+            std::exit(1);
+        }
+        return v;
+    } catch (...) {
+        std::cerr << "Error: " << key << " must be >= 0: " << value << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+        return 0;
+    }
+}
+
+static int parseHelpOverlaySeconds(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
+{
+    try {
+        int v = std::stoi(value);
+        if (v < 1 || v > 60) {
+            std::cerr << "Error: " << key << " must be between 1 and 60: " << value << " in " << path << ":" << lineNumber << "\n";
+            std::exit(1);
+        }
+        return v;
+    } catch (...) {
+        std::cerr << "Error: " << key << " must be between 1 and 60: " << value << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+        return 0;
+    }
+}
+
+// --- Numeric helpers for CLI (no file/line) ---
+static int parsePositiveIntCli(const std::string& value, const std::string& option)
+{
+    try {
+        int v = std::stoi(value);
+        if (v <= 0) {
+            std::cerr << "Error: " << option << " requires a positive numeric value\n";
+            std::exit(1);
+        }
+        return v;
+    } catch (...) {
+        std::cerr << "Error: " << option << " requires a positive numeric value\n";
+        std::exit(1);
+        return 0;
+    }
+}
+
+static double parsePositiveDoubleCli(const std::string& value, const std::string& option)
+{
+    try {
+        double v = std::stod(value);
+        if (v <= 0.0) {
+            std::cerr << "Error: " << option << " requires a positive numeric value\n";
+            std::exit(1);
+        }
+        return v;
+    } catch (...) {
+        std::cerr << "Error: " << option << " requires a positive numeric value\n";
+        std::exit(1);
+        return 0.0;
+    }
 }
 
 // --- Font discovery ---
@@ -143,14 +224,14 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
 
         try
         {
-            if      (key == "width")                     config.width = std::stoi(value);
-            else if (key == "height")                    config.height = std::stoi(value);
+            if      (key == "width")                     config.width = parsePositiveInt(value, key, path, lineNumber);
+            else if (key == "height")                    config.height = parsePositiveInt(value, key, path, lineNumber);
             else if (key == "fullscreen")                config.fullscreen = parseBool(value, key, path, lineNumber);
             else if (key == "font_path")                 config.fontPath = value;
-            else if (key == "status_font_size")          config.statusFontSize = std::stoi(value);
-            else if (key == "tempo_font_size")           config.tempoFontSize = std::stoi(value);
-            else if (key == "bottom_font_size")          config.bottomFontSize = std::stoi(value);
-            else if (key == "help_font_size")            config.helpFontSize = std::stoi(value);
+            else if (key == "status_font_size")          config.statusFontSize = parsePositiveInt(value, key, path, lineNumber);
+            else if (key == "tempo_font_size")           config.tempoFontSize = parsePositiveInt(value, key, path, lineNumber);
+            else if (key == "bottom_font_size")          config.bottomFontSize = parsePositiveInt(value, key, path, lineNumber);
+            else if (key == "help_font_size")            config.helpFontSize = parsePositiveInt(value, key, path, lineNumber);
             else if (key == "top_band_color")
             {
                 config.topBandColor = parseRgba(value, key, path, lineNumber);
@@ -172,18 +253,12 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             else if (key == "tempo_color")               config.tempoColor = parseRgba(value, key, path, lineNumber);
             else if (key == "phase_bar_color")           config.phaseBarColor = parseRgba(value, key, path, lineNumber);
             else if (key == "phase_marker_color")        config.phaseMarkerColor = parseRgba(value, key, path, lineNumber);
-            else if (key == "phase_bar_height")          config.phaseBarHeight = std::stoi(value);
-            else if (key == "phase_bar_segment_gap")     config.phaseBarSegmentGap = std::stoi(value);
+            else if (key == "phase_bar_height")          config.phaseBarHeight = parsePositiveInt(value, key, path, lineNumber);
+            else if (key == "phase_bar_segment_gap")     config.phaseBarSegmentGap = parseNonNegativeInt(value, key, path, lineNumber);
             else if (key == "phase_bar_margin")
             {
-                int m = std::stoi(value);
-                if (m < 0)
-                {
-                    std::cerr << "Error: phase_bar_margin must be >= 0: " << value
-                              << " in " << path << ":" << lineNumber << "\n";
-                    std::exit(1);
-                }
-                // Practical usable width check (if width known at this point)
+                int m = parseNonNegativeInt(value, key, path, lineNumber);
+                // Practical usable width check
                 if (config.width > 0 && (m * 2 >= config.width))
                 {
                     std::cerr << "Error: phase_bar_margin too large for width (leaves no usable bar): " << value
@@ -194,7 +269,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             }
             else if (key == "help_overlay_background_color") config.helpOverlayBackgroundColor = parseRgba(value, key, path, lineNumber);
             else if (key == "help_overlay_text_color")   config.helpOverlayTextColor = parseRgba(value, key, path, lineNumber);
-            else if (key == "help_overlay_seconds")      config.helpOverlaySeconds = std::stoi(value);
+            else if (key == "help_overlay_seconds")      config.helpOverlaySeconds = parseHelpOverlaySeconds(value, key, path, lineNumber);
             else if (key == "hide_mouse_cursor")         config.hideMouseCursor = parseBool(value, key, path, lineNumber);
             else if (key == "background_color")
             {
@@ -286,7 +361,6 @@ Config parseConfig(int argc, char** argv)
     }
 
     // === Apply legacy alias fallback logic ONLY if the deprecated alias was explicitly present ===
-    // This preserves built-in v0.4 defaults when no config or no alias keys are used.
     if (config.backgroundColorExplicit && !config.centerBandColorExplicit)
     {
         config.centerBandColor = config.backgroundColor;
@@ -309,7 +383,6 @@ Config parseConfig(int argc, char** argv)
         else if (arg == "--windowed")             config.fullscreen = false;
         else if (arg == "--config")
         {
-            // Skip --config VALUE in pass 2 (already handled in pass 1). Validate for safety.
             if (i + 1 >= argc || std::string(argv[i+1]).rfind("--", 0) == 0)
             {
                 std::cerr << "Error: --config requires a PATH argument\n";
@@ -321,22 +394,12 @@ Config parseConfig(int argc, char** argv)
         else if (arg == "--width")
         {
             std::string val = getRequiredCliValue(i, argc, argv, "--width");
-            try {
-                config.width = std::stoi(val);
-            } catch (...) {
-                std::cerr << "Error: --width requires a numeric value\n";
-                std::exit(1);
-            }
+            config.width = parsePositiveIntCli(val, "--width");
         }
         else if (arg == "--height")
         {
             std::string val = getRequiredCliValue(i, argc, argv, "--height");
-            try {
-                config.height = std::stoi(val);
-            } catch (...) {
-                std::cerr << "Error: --height requires a numeric value\n";
-                std::exit(1);
-            }
+            config.height = parsePositiveIntCli(val, "--height");
         }
         else if (arg == "--font")
         {
@@ -345,22 +408,12 @@ Config parseConfig(int argc, char** argv)
         else if (arg == "--tempo")
         {
             std::string val = getRequiredCliValue(i, argc, argv, "--tempo");
-            try {
-                config.initialTempo = std::stod(val);
-            } catch (...) {
-                std::cerr << "Error: --tempo requires a numeric value\n";
-                std::exit(1);
-            }
+            config.initialTempo = parsePositiveDoubleCli(val, "--tempo");
         }
         else if (arg == "--quantum")
         {
             std::string val = getRequiredCliValue(i, argc, argv, "--quantum");
-            try {
-                config.quantum = std::stod(val);
-            } catch (...) {
-                std::cerr << "Error: --quantum requires a numeric value\n";
-                std::exit(1);
-            }
+            config.quantum = parsePositiveDoubleCli(val, "--quantum");
         }
         else if (arg.rfind("--", 0) == 0)
         {
