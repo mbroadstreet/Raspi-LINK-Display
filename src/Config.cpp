@@ -11,6 +11,56 @@
 
 namespace fs = std::filesystem;
 
+static std::string trim(const std::string& s) {
+    size_t start = s.find_first_not_of(" \t");
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(" \t");
+    return s.substr(start, end - start + 1);
+}
+
+// --- Strict whole-string numeric conversion helpers ---
+static int strictStoi(const std::string& s, const std::string& key, const std::string& path, int lineNumber) {
+    std::string t = trim(s);
+    if (t.empty()) {
+        std::cerr << "Error: " << key << " must be a valid integer: " << s << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+    }
+    size_t pos = 0;
+    int v;
+    try {
+        v = std::stoi(t, &pos);
+        if (pos != t.size()) {
+            std::cerr << "Error: " << key << " must be a valid integer (no trailing characters): " << s << " in " << path << ":" << lineNumber << "\n";
+            std::exit(1);
+        }
+    } catch (...) {
+        std::cerr << "Error: " << key << " must be a valid integer: " << s << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+    }
+    return v;
+}
+
+static double strictStod(const std::string& s, const std::string& key, const std::string& path, int lineNumber) {
+    std::string t = trim(s);
+    if (t.empty()) {
+        std::cerr << "Error: " << key << " must be a valid number: " << s << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+    }
+    size_t pos = 0;
+    double v;
+    try {
+        v = std::stod(t, &pos);
+        if (pos != t.size()) {
+            std::cerr << "Error: " << key << " must be a valid number (no trailing characters): " << s << " in " << path << ":" << lineNumber << "\n";
+            std::exit(1);
+        }
+    } catch (...) {
+        std::cerr << "Error: " << key << " must be a valid number: " << s << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
+    }
+    return v;
+}
+
 // --- Strict RGBA parser with validation and error reporting ---
 static RgbaColor parseRgba(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
 {
@@ -20,14 +70,18 @@ static RgbaColor parseRgba(const std::string& value, const std::string& key, con
 
     while (std::getline(iss, token, ','))
     {
-        token.erase(0, token.find_first_not_of(" \t"));
-        token.erase(token.find_last_not_of(" \t") + 1);
-
-        if (token.empty()) continue;
+        std::string t = trim(token);
+        if (t.empty()) continue;
 
         try
         {
-            int v = std::stoi(token);
+            size_t pos = 0;
+            int v = std::stoi(t, &pos);
+            if (pos != t.size()) {
+                std::cerr << "Error: Invalid color component in " << key << " (must be valid integer, no trailing chars): " << value
+                          << " in " << path << ":" << lineNumber << "\n";
+                std::exit(1);
+            }
             if (v < 0 || v > 255)
             {
                 std::cerr << "Error: Invalid color component in " << key << " (must be 0-255): " << value
@@ -62,9 +116,7 @@ static RgbaColor parseRgba(const std::string& value, const std::string& key, con
 // --- Boolean parser (strict) ---
 static bool parseBool(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
 {
-    std::string v = value;
-    v.erase(0, v.find_first_not_of(" \t"));
-    v.erase(v.find_last_not_of(" \t") + 1);
+    std::string v = trim(value);
 
     if (v == "true" || v == "yes" || v == "1" || v == "on") return true;
     if (v == "false" || v == "no" || v == "0" || v == "off") return false;
@@ -78,83 +130,85 @@ static bool parseBool(const std::string& value, const std::string& key, const st
 // --- Numeric helpers for config file (with file/line in errors) ---
 static int parsePositiveInt(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
 {
-    try {
-        int v = std::stoi(value);
-        if (v <= 0) {
-            std::cerr << "Error: " << key << " must be > 0: " << value << " in " << path << ":" << lineNumber << "\n";
-            std::exit(1);
-        }
-        return v;
-    } catch (...) {
+    int v = strictStoi(value, key, path, lineNumber);
+    if (v <= 0) {
         std::cerr << "Error: " << key << " must be > 0: " << value << " in " << path << ":" << lineNumber << "\n";
         std::exit(1);
-        return 0;
     }
+    return v;
 }
 
 static int parseNonNegativeInt(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
 {
-    try {
-        int v = std::stoi(value);
-        if (v < 0) {
-            std::cerr << "Error: " << key << " must be >= 0: " << value << " in " << path << ":" << lineNumber << "\n";
-            std::exit(1);
-        }
-        return v;
-    } catch (...) {
+    int v = strictStoi(value, key, path, lineNumber);
+    if (v < 0) {
         std::cerr << "Error: " << key << " must be >= 0: " << value << " in " << path << ":" << lineNumber << "\n";
         std::exit(1);
-        return 0;
     }
+    return v;
 }
 
 static int parseHelpOverlaySeconds(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
 {
-    try {
-        int v = std::stoi(value);
-        if (v < 1 || v > 60) {
-            std::cerr << "Error: " << key << " must be between 1 and 60: " << value << " in " << path << ":" << lineNumber << "\n";
-            std::exit(1);
-        }
-        return v;
-    } catch (...) {
+    int v = strictStoi(value, key, path, lineNumber);
+    if (v < 1 || v > 60) {
         std::cerr << "Error: " << key << " must be between 1 and 60: " << value << " in " << path << ":" << lineNumber << "\n";
         std::exit(1);
-        return 0;
     }
+    return v;
 }
 
 // --- Numeric helpers for CLI (no file/line) ---
 static int parsePositiveIntCli(const std::string& value, const std::string& option)
 {
+    std::string t = trim(value);
+    if (t.empty()) {
+        std::cerr << "Error: " << option << " requires a positive numeric value\n";
+        std::exit(1);
+    }
+    size_t pos = 0;
+    int v;
     try {
-        int v = std::stoi(value);
-        if (v <= 0) {
+        v = std::stoi(t, &pos);
+        if (pos != t.size()) {
             std::cerr << "Error: " << option << " requires a positive numeric value\n";
             std::exit(1);
         }
-        return v;
     } catch (...) {
         std::cerr << "Error: " << option << " requires a positive numeric value\n";
         std::exit(1);
-        return 0;
     }
+    if (v <= 0) {
+        std::cerr << "Error: " << option << " requires a positive numeric value\n";
+        std::exit(1);
+    }
+    return v;
 }
 
 static double parsePositiveDoubleCli(const std::string& value, const std::string& option)
 {
+    std::string t = trim(value);
+    if (t.empty()) {
+        std::cerr << "Error: " << option << " requires a positive numeric value\n";
+        std::exit(1);
+    }
+    size_t pos = 0;
+    double v;
     try {
-        double v = std::stod(value);
-        if (v <= 0.0) {
+        v = std::stod(t, &pos);
+        if (pos != t.size()) {
             std::cerr << "Error: " << option << " requires a positive numeric value\n";
             std::exit(1);
         }
-        return v;
     } catch (...) {
         std::cerr << "Error: " << option << " requires a positive numeric value\n";
         std::exit(1);
-        return 0.0;
     }
+    if (v <= 0.0) {
+        std::cerr << "Error: " << option << " requires a positive numeric value\n";
+        std::exit(1);
+    }
+    return v;
 }
 
 // --- Font discovery ---
