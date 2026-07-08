@@ -1,72 +1,67 @@
-# UI/Display Contract (v0.3.4 baseline)
+# UI/Display Contract (v0.3.6 baseline)
 
 This document describes the **display/GUI contract** separately from the runtime/API contract.
 
 ## Separation of Concerns
 
-- **Core/Runtime Contract** (unchanged by GUI work):
+- **Core/Runtime Contract**:
   - Ableton Link integration via `LinkEngine`
-  - `LinkDisplayState` snapshot (tempo, beat, phase, remotePeers, linkEnabled)
-  - Peer count = remote peers only (`link.numPeers()`)
-  - Tempo shown with exactly two decimal places
-  - Beat/phase calculations use default quantum = 4.0
-  - Manual start only — no systemd service
+  - `LinkDisplayState` snapshot
+  - Peer count = remote peers only
+  - Manual start only
 
 - **Display/GUI Contract** (this document):
-  - Screen layout and visual presentation only
+  - Screen layout and visual presentation
   - Text formatting and rendering
-  - Band sizing and positioning
-  - Colors, shapes, and visual elements
-  - SDL2_ttf usage
+  - Colors, fonts, and layout values (many now configurable)
+  - Help overlay behavior
 
-## Current v0.3.4 Display Layout (480×320)
+## Current Display Layout (480×320)
 
-Three horizontal bands with improved visual balance:
+### Top band
+- Link status line (enlarged, configurable color)
+- `LINK Inactive`
+- `LINK Active · No Peers`
+- `LINK Network Devices: N`
 
-### Top band (status)
-- Enlarged centered Link status line
-- Slightly lower vertical position than v0.3.3
-- Status strings:
-  - `LINK Inactive`
-  - `LINK Active · No Peers`
-  - `LINK Network Devices: N`
-- Peer count remains remote-peers-only
+### Center band
+- Large tempo (exactly two decimals, no BPM suffix)
 
-### Center band (tempo)
-- Large tempo with side padding
-- Exactly two decimal places
-- No BPM suffix
-- Remains the dominant visual element
-
-### Bottom band (phase meter)
-- Phase-only 4-segment blue phase bar
+### Bottom band
+- Phase-only 4-segment blue phase bar with white marker
 - No beat count
 - No numeric phase text
-- No bullet separator
-- Slightly narrower than v0.3.3 version
-- Visible white phase position marker
-- Marker moves smoothly through the 4-beat cycle
 
-## Future Visual/Theming Tickets (Documented but Not Implemented)
+## Help Overlay (F1)
 
-The following areas are expected to be explored in future tickets. They are **not** part of the current v0.3.4 implementation:
+- Press **F1** in GUI mode to show a brief help overlay.
+- The overlay auto-dismisses after the configured number of seconds (`help_overlay_seconds`, default 8).
+- Overlay text:
+  ```
+  F1 Help
+  Q / Esc  Quit
+  F        Toggle Fullscreen
+  ```
+
+## Configuration
+
+Many visual and layout values can now be changed via `config/link-pi-display.conf` without recompiling:
+
+- Font sizes
+- Colors (status, tempo, phase bar, help overlay, etc.)
+- Phase bar dimensions
+- Help overlay timeout
+
+See `config/link-pi-display.example.conf` for the full list of supported keys.
+
+## Future Visual/Theming Work (Planned)
+
+The following areas are expected to be explored in future tickets but are **not** implemented in v0.3.6:
 
 - Warm grey tempo color
-- Top-line color choices
-- Adjusted lower phase meter shade
-- Alternate font exploration
-- Possible renderer cleanup to centralize theme values (colors, font sizes, padding, bar dimensions)
+- Additional top-line color options
+- Phase meter shade variations
+- Alternate font support
+- Centralized theme/constants in the renderer
 
-These items should be treated as future work and should not be implemented unless a later ticket explicitly authorizes them.
-
-## Scope for GUI Work
-
-GUI-only changes are restricted to:
-- `DisplayText.*`
-- `SdlRenderer.*`
-- Rendering helpers
-- `docs/UI-SPEC.md`
-- `README.md` (display-related sections)
-- `docs/TEST-PLAN.md` (UI test sections)
-
-Runtime behavior, LinkEngine, peer-count semantics, and tempo semantics must remain untouched unless explicitly authorized.
+These remain future work.

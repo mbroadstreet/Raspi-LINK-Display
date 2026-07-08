@@ -17,6 +17,11 @@ namespace
             throw std::runtime_error(message);
         }
     }
+
+    SDL_Color toSDL(const RgbaColor& c)
+    {
+        return {static_cast<Uint8>(c.r), static_cast<Uint8>(c.g), static_cast<Uint8>(c.b), static_cast<Uint8>(c.a)};
+    }
 }
 
 SdlRenderer::SdlRenderer(const Config& config)
@@ -63,17 +68,20 @@ SdlRenderer::SdlRenderer(const Config& config)
         );
     }
 
-    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), 30);   // v0.3.5: adjusted
-    tempoFont_ = TTF_OpenFont(config_.fontPath.c_str(), 110);
-    bottomFont_ = TTF_OpenFont(config_.fontPath.c_str(), 25);  // v0.3.5: adjusted
+    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.statusFontSize);
+    tempoFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.tempoFontSize);
+    bottomFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.bottomFontSize);
+    helpFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.helpFontSize);
 
     require(statusFont_ != nullptr, std::string("TTF_OpenFont status failed: ") + TTF_GetError());
     require(tempoFont_ != nullptr, std::string("TTF_OpenFont tempo failed: ") + TTF_GetError());
     require(bottomFont_ != nullptr, std::string("TTF_OpenFont bottom failed: ") + TTF_GetError());
+    require(helpFont_ != nullptr, std::string("TTF_OpenFont help failed: ") + TTF_GetError());
 }
 
 SdlRenderer::~SdlRenderer()
 {
+    if (helpFont_) TTF_CloseFont(helpFont_);
     if (bottomFont_) TTF_CloseFont(bottomFont_);
     if (tempoFont_) TTF_CloseFont(tempoFont_);
     if (statusFont_) TTF_CloseFont(statusFont_);
@@ -97,9 +105,29 @@ bool SdlRenderer::pollQuit()
         if (event.type == SDL_KEYDOWN)
         {
             const SDL_Keycode key = event.key.keysym.sym;
+
             if (key == SDLK_ESCAPE || key == SDLK_q)
             {
                 return true;
+            }
+
+            if (key == SDLK_F1)
+            {
+                showHelpOverlay();
+            }
+
+            if (key == SDLK_f)
+            {
+                // Toggle fullscreen/windowed (runtime only, does not save config)
+                Uint32 flags = SDL_GetWindowFlags(window_);
+                if (flags & SDL_WINDOW_FULLSCREEN_DESKTOP)
+                {
+                    SDL_SetWindowFullscreen(window_, 0);
+                }
+                else
+                {
+                    SDL_SetWindowFullscreen(window_, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                }
             }
         }
     }
@@ -155,7 +183,6 @@ void SdlRenderer::render(const LinkDisplayState& state)
     int outputH = config_.height;
     SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
 
-    // v0.3.4: slightly lower top line + modest extra padding
     const int topPadding = 18;
     const int bottomPadding = 14;
     const int topBandHeight = 46;
@@ -165,42 +192,40 @@ void SdlRenderer::render(const LinkDisplayState& state)
     const SDL_Rect centerBand {0, topBand.y + topBand.h + 8, outputW, outputH - topBandHeight - bottomBandHeight - topPadding - bottomPadding - 16};
     const SDL_Rect bottomBand {0, outputH - bottomBandHeight - bottomPadding, outputW, bottomBandHeight};
 
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+    SDL_SetRenderDrawColor(renderer_, config_.backgroundColor.r, config_.backgroundColor.g, config_.backgroundColor.b, config_.backgroundColor.a);
     SDL_RenderClear(renderer_);
 
-    SDL_SetRenderDrawColor(renderer_, 18, 18, 18, 255);
+    SDL_SetRenderDrawColor(renderer_, config_.bandColor.r, config_.bandColor.g, config_.bandColor.b, config_.bandColor.a);
     SDL_RenderFillRect(renderer_, &topBand);
     SDL_RenderFillRect(renderer_, &bottomBand);
 
-    const SDL_Color statusNoPeers {40, 44, 48, 255};
-    const SDL_Color statusConnected {75, 85, 95, 255};
-    const SDL_Color tempoColor {64, 79, 96, 255};
-    const SDL_Color phaseBarColor {83, 114, 151, 255};
-    const SDL_Color phaseTextColor {75, 85, 95, 255};
-
     const SDL_Color statusColor = (state.linkEnabled && state.remotePeers > 0)
-        ? statusConnected
-        : statusNoPeers;
+        ? toSDL(config_.statusConnectedColor)
+        : toSDL(config_.statusNoPeersColor);
 
     renderCenteredText(DisplayText::formatStatusLine(state), statusFont_, topBand, statusColor);
-    renderCenteredText(DisplayText::formatTempoLine(state), tempoFont_, centerBand, tempoColor);
-    renderBottomBeatAndPhaseBar(state, bottomBand, phaseTextColor, phaseBarColor);
+    renderCenteredText(DisplayText::formatTempoLine(state), tempoFont_, centerBand, toSDL(config_.tempoColor));
+    renderBottomPhaseBar(state, bottomBand, toSDL(config_.phaseBarColor), toSDL(config_.phaseMarkerColor));
+
+    if (helpOverlayVisible_)
+    {
+        renderHelpOverlay();
+    }
 
     SDL_RenderPresent(renderer_);
 }
 
-void SdlRenderer::renderBottomBeatAndPhaseBar(const LinkDisplayState& state,
-                                              const SDL_Rect& area,
-                                              SDL_Color textColor,
-                                              SDL_Color barColor)
+void SdlRenderer::renderBottomPhaseBar(const LinkDisplayState& state,
+                                       const SDL_Rect& area,
+                                       SDL_Color barColor,
+                                       SDL_Color markerColor)
 {
-    // v0.3.4: slightly narrower phase bar than v0.3.3
-    const int barHeight = 22;
+    const int barHeight = config_.phaseBarHeight;
     const int barY = area.y + (area.h - barHeight) / 2;
-    const int margin = 24;   // increased for narrower bar
+    const int margin = 24;
     const int barWidth = area.w - (margin * 2);
     const int barX = area.x + margin;
-    const int segmentGap = 6;
+    const int segmentGap = config_.phaseBarSegmentGap;
     const int segmentWidth = std::max(5, (barWidth - (segmentGap * 3)) / 4);
     const int actualBarWidth = (segmentWidth * 4) + (segmentGap * 3);
 
@@ -227,6 +252,46 @@ void SdlRenderer::renderBottomBeatAndPhaseBar(const LinkDisplayState& state,
     const int markerOffset = static_cast<int>(std::lround(phaseNorm * markerTravel));
     const int markerX = std::clamp(barX + markerOffset, barX, barX + markerTravel);
 
-    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
+    SDL_SetRenderDrawColor(renderer_, markerColor.r, markerColor.g, markerColor.b, markerColor.a);
     SDL_RenderDrawLine(renderer_, markerX, barY - 4, markerX, barY + barHeight + 4);
+}
+
+void SdlRenderer::showHelpOverlay()
+{
+    helpOverlayVisible_ = true;
+    helpOverlayStartTime_ = SDL_GetTicks();
+}
+
+bool SdlRenderer::isHelpOverlayVisible() const
+{
+    return helpOverlayVisible_;
+}
+
+void SdlRenderer::renderHelpOverlay()
+{
+    Uint32 now = SDL_GetTicks();
+    if (now - helpOverlayStartTime_ > static_cast<Uint32>(config_.helpOverlaySeconds * 1000))
+    {
+        helpOverlayVisible_ = false;
+        return;
+    }
+
+    const int w = 280;
+    const int h = 70;
+    const int x = (config_.width - w) / 2;
+    const int y = 20;
+
+    SDL_Rect bg {x, y, w, h};
+    SDL_SetRenderDrawColor(renderer_,
+        config_.helpOverlayBackgroundColor.r,
+        config_.helpOverlayBackgroundColor.g,
+        config_.helpOverlayBackgroundColor.b,
+        config_.helpOverlayBackgroundColor.a);
+    SDL_RenderFillRect(renderer_, &bg);
+
+    SDL_Color textColor = toSDL(config_.helpOverlayTextColor);
+
+    renderCenteredText("F1 Help", helpFont_, {x, y + 5, w, 22}, textColor);
+    renderCenteredText("Q / Esc  Quit", helpFont_, {x, y + 28, w, 20}, textColor);
+    renderCenteredText("F        Toggle Fullscreen", helpFont_, {x, y + 48, w, 20}, textColor);
 }
