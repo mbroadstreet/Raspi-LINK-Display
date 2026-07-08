@@ -206,17 +206,16 @@ void SdlRenderer::render(const LinkDisplayState& state)
     const SDL_Rect centerBand {0, topBand.y + topBand.h + 8, outputW, outputH - topBandHeight - bottomBandHeight - topPadding - bottomPadding - 16};
     const SDL_Rect bottomBand {0, outputH - bottomBandHeight - bottomPadding, outputW, bottomBandHeight};
 
-    // Background
-    SDL_SetRenderDrawColor(renderer_,
-        config_.backgroundColor.r,
-        config_.backgroundColor.g,
-        config_.backgroundColor.b,
-        config_.backgroundColor.a);
+    // Clear to a safe base (black)
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
 
-    // Bands
+    // Fill bands explicitly using v0.4 colors
     SDL_SetRenderDrawColor(renderer_, toSDL(config_.topBandColor).r, toSDL(config_.topBandColor).g, toSDL(config_.topBandColor).b, toSDL(config_.topBandColor).a);
     SDL_RenderFillRect(renderer_, &topBand);
+
+    SDL_SetRenderDrawColor(renderer_, toSDL(config_.centerBandColor).r, toSDL(config_.centerBandColor).g, toSDL(config_.centerBandColor).b, toSDL(config_.centerBandColor).a);
+    SDL_RenderFillRect(renderer_, &centerBand);
 
     SDL_SetRenderDrawColor(renderer_, toSDL(config_.bottomBandColor).r, toSDL(config_.bottomBandColor).g, toSDL(config_.bottomBandColor).b, toSDL(config_.bottomBandColor).a);
     SDL_RenderFillRect(renderer_, &bottomBand);
@@ -251,7 +250,7 @@ void SdlRenderer::renderBottomPhaseBar(const LinkDisplayState& state,
 {
     const int barHeight = config_.phaseBarHeight;
     const int barY = area.y + (area.h - barHeight) / 2;
-    const int margin = 24;
+    const int margin = config_.phaseBarMargin;
     const int barWidth = area.w - (margin * 2);
     const int barX = area.x + margin;
     const int segmentGap = config_.phaseBarSegmentGap;

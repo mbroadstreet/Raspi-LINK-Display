@@ -11,30 +11,69 @@
 
 namespace fs = std::filesystem;
 
-// --- Helper: Parse RGBA string ---
-static RgbaColor parseRgba(const std::string& value, const RgbaColor& fallback)
+// --- Strict RGBA parser with validation and error reporting ---
+static RgbaColor parseRgba(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
 {
     std::istringstream iss(value);
     std::string token;
-    RgbaColor c = fallback;
-    int components[4] = {fallback.r, fallback.g, fallback.b, fallback.a};
-    int i = 0;
+    std::vector<int> components;
 
-    while (std::getline(iss, token, ',') && i < 4)
+    while (std::getline(iss, token, ','))
     {
-        try { components[i] = std::stoi(token); }
-        catch (...) { return fallback; }
-        ++i;
+        // trim
+        token.erase(0, token.find_first_not_of(" \t"));
+        token.erase(token.find_last_not_of(" \t") + 1);
+
+        if (token.empty()) continue;
+
+        try
+        {
+            int v = std::stoi(token);
+            if (v < 0 || v > 255)
+            {
+                std::cerr << "Error: Invalid color component in " << key << " (must be 0-255): " << value
+                          << " in " << path << ":" << lineNumber << "\n";
+                std::exit(1);
+            }
+            components.push_back(v);
+        }
+        catch (...)
+        {
+            std::cerr << "Error: Invalid color value for " << key << ": " << value
+                      << " in " << path << ":" << lineNumber << "\n";
+            std::exit(1);
+        }
     }
 
-    if (i >= 3)
+    if (components.size() != 3 && components.size() != 4)
     {
-        c.r = components[0];
-        c.g = components[1];
-        c.b = components[2];
-        c.a = (i == 4) ? components[3] : 255;
+        std::cerr << "Error: " << key << " must have 3 or 4 components (r,g,b[,a]): " << value
+                  << " in " << path << ":" << lineNumber << "\n";
+        std::exit(1);
     }
+
+    RgbaColor c;
+    c.r = components[0];
+    c.g = components[1];
+    c.b = components[2];
+    c.a = (components.size() == 4) ? components[3] : 255;
     return c;
+}
+
+// --- Boolean parser (strict) ---
+static bool parseBool(const std::string& value, const std::string& key, const std::string& path, int lineNumber)
+{
+    std::string v = value;
+    v.erase(0, v.find_first_not_of(" \t"));
+    v.erase(v.find_last_not_of(" \t") + 1);
+
+    if (v == "true" || v == "yes" || v == "1" || v == "on") return true;
+    if (v == "false" || v == "no" || v == "0" || v == "off") return false;
+
+    std::cerr << "Error: Invalid boolean value for " << key << ": " << value
+              << " (expected true/false/yes/no/1/0/on/off) in " << path << ":" << lineNumber << "\n";
+    std::exit(1);
+    return false;
 }
 
 // --- Font discovery ---
@@ -69,7 +108,7 @@ void printUsage(const char* argv0)
         << "  --help                    Show this help.\n";
 }
 
-// --- Load config file ---
+// --- Load config file with strict validation ---
 static void loadConfigFile(Config& config, const std::string& path, int& errorCount)
 {
     std::ifstream file(path);
@@ -102,30 +141,55 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
         key.erase(key.find_last_not_of(" \t") + 1);
         value.erase(0, value.find_first_not_of(" \t"));
 
-        if      (key == "width")                     config.width = std::stoi(value);
-        else if (key == "height")                    config.height = std::stoi(value);
-        else if (key == "fullscreen")                config.fullscreen = (value == "true" || value == "1" || value == "yes");
-        else if (key == "font_path")                 config.fontPath = value;
-        else if (key == "status_font_size")          config.statusFontSize = std::stoi(value);
-        else if (key == "tempo_font_size")           config.tempoFontSize = std::stoi(value);
-        else if (key == "bottom_font_size")          config.bottomFontSize = std::stoi(value);
-        else if (key == "help_font_size")            config.helpFontSize = std::stoi(value);
-        else if (key == "top_band_color")            config.topBandColor = parseRgba(value, config.topBandColor);
-        else if (key == "center_band_color")         config.centerBandColor = parseRgba(value, config.centerBandColor);
-        else if (key == "bottom_band_color")         config.bottomBandColor = parseRgba(value, config.bottomBandColor);
-        else if (key == "status_inactive_color")     config.statusInactiveColor = parseRgba(value, config.statusInactiveColor);
-        else if (key == "status_no_peers_color")     config.statusNoPeersColor = parseRgba(value, config.statusNoPeersColor);
-        else if (key == "status_connected_color")    config.statusConnectedColor = parseRgba(value, config.statusConnectedColor);
-        else if (key == "tempo_color")               config.tempoColor = parseRgba(value, config.tempoColor);
-        else if (key == "phase_bar_color")           config.phaseBarColor = parseRgba(value, config.phaseBarColor);
-        else if (key == "phase_marker_color")        config.phaseMarkerColor = parseRgba(value, config.phaseMarkerColor);
-        else if (key == "help_overlay_seconds")      config.helpOverlaySeconds = std::stoi(value);
-        else if (key == "hide_mouse_cursor")         config.hideMouseCursor = (value == "true" || value == "1" || value == "yes");
-        else if (key == "background_color")          config.backgroundColor = parseRgba(value, config.backgroundColor);
-        else if (key == "band_color")                config.bandColor = parseRgba(value, config.bandColor);
-        else
+        try
         {
-            std::cerr << "Warning: Unknown config key '" << key << "' in " << path << ":" << lineNumber << "\n";
+            if      (key == "width")                     config.width = std::stoi(value);
+            else if (key == "height")                    config.height = std::stoi(value);
+            else if (key == "fullscreen")                config.fullscreen = parseBool(value, key, path, lineNumber);
+            else if (key == "font_path")                 config.fontPath = value;
+            else if (key == "status_font_size")          config.statusFontSize = std::stoi(value);
+            else if (key == "tempo_font_size")           config.tempoFontSize = std::stoi(value);
+            else if (key == "bottom_font_size")          config.bottomFontSize = std::stoi(value);
+            else if (key == "help_font_size")            config.helpFontSize = std::stoi(value);
+            else if (key == "top_band_color")
+            {
+                config.topBandColor = parseRgba(value, key, path, lineNumber);
+                config.topBandColorExplicit = true;
+            }
+            else if (key == "center_band_color")
+            {
+                config.centerBandColor = parseRgba(value, key, path, lineNumber);
+                config.centerBandColorExplicit = true;
+            }
+            else if (key == "bottom_band_color")
+            {
+                config.bottomBandColor = parseRgba(value, key, path, lineNumber);
+                config.bottomBandColorExplicit = true;
+            }
+            else if (key == "status_inactive_color")     config.statusInactiveColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "status_no_peers_color")     config.statusNoPeersColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "status_connected_color")    config.statusConnectedColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "tempo_color")               config.tempoColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "phase_bar_color")           config.phaseBarColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "phase_marker_color")        config.phaseMarkerColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "phase_bar_height")          config.phaseBarHeight = std::stoi(value);
+            else if (key == "phase_bar_segment_gap")     config.phaseBarSegmentGap = std::stoi(value);
+            else if (key == "phase_bar_margin")          config.phaseBarMargin = std::max(0, std::stoi(value));
+            else if (key == "help_overlay_background_color") config.helpOverlayBackgroundColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "help_overlay_text_color")   config.helpOverlayTextColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "help_overlay_seconds")      config.helpOverlaySeconds = std::stoi(value);
+            else if (key == "hide_mouse_cursor")         config.hideMouseCursor = parseBool(value, key, path, lineNumber);
+            else if (key == "background_color")          config.backgroundColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "band_color")                config.bandColor = parseRgba(value, key, path, lineNumber);
+            else
+            {
+                std::cerr << "Warning: Unknown config key '" << key << "' in " << path << ":" << lineNumber << "\n";
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "Error parsing " << key << " = " << value << " in " << path << ":" << lineNumber << ": " << e.what() << "\n";
+            errorCount++;
         }
     }
 }
@@ -142,8 +206,13 @@ Config parseConfig(int argc, char** argv)
     // === Pass 1: Look for --config only ===
     for (int i = 1; i < argc; ++i)
     {
-        if (std::string(argv[i]) == "--config" && i + 1 < argc)
+        if (std::string(argv[i]) == "--config")
         {
+            if (i + 1 >= argc || std::string(argv[i+1]).rfind("--", 0) == 0)
+            {
+                std::cerr << "Error: --config requires a PATH argument\n";
+                std::exit(1);
+            }
             configFilePath = argv[++i];
             configFileExplicitlyRequested = true;
         }
@@ -174,15 +243,15 @@ Config parseConfig(int argc, char** argv)
         }
     }
 
-    // === Apply legacy alias fallback logic ===
-    if (!config.topBandColor.r && !config.topBandColor.g && !config.topBandColor.b)
+    // === Apply legacy alias fallback logic (only if explicit new keys not set) ===
+    if (!config.topBandColorExplicit)
         config.topBandColor = config.bandColor;
-    if (!config.centerBandColor.r && !config.centerBandColor.g && !config.centerBandColor.b)
+    if (!config.centerBandColorExplicit)
         config.centerBandColor = config.backgroundColor;
-    if (!config.bottomBandColor.r && !config.bottomBandColor.g && !config.bottomBandColor.b)
+    if (!config.bottomBandColorExplicit)
         config.bottomBandColor = config.bandColor;
 
-    // === Pass 2: Apply all CLI overrides ===
+    // === Pass 2: Apply all CLI overrides (strict) ===
     for (int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
@@ -190,11 +259,37 @@ Config parseConfig(int argc, char** argv)
         if (arg == "--help" || arg == "-h") { printUsage(argv[0]); std::exit(0); }
         else if (arg == "--no-gui")               config.noGui = true;
         else if (arg == "--windowed")             config.fullscreen = false;
-        else if (arg == "--width"   && i+1<argc)  config.width = std::stoi(argv[++i]);
-        else if (arg == "--height"  && i+1<argc)  config.height = std::stoi(argv[++i]);
-        else if (arg == "--font"    && i+1<argc)  config.fontPath = argv[++i];
-        else if (arg == "--tempo"   && i+1<argc)  config.initialTempo = std::stod(argv[++i]);
-        else if (arg == "--quantum" && i+1<argc)  config.quantum = std::stod(argv[++i]);
+        else if (arg == "--width")
+        {
+            if (i+1 >= argc) { std::cerr << "Error: --width requires a value\n"; std::exit(1); }
+            config.width = std::stoi(argv[++i]);
+        }
+        else if (arg == "--height")
+        {
+            if (i+1 >= argc) { std::cerr << "Error: --height requires a value\n"; std::exit(1); }
+            config.height = std::stoi(argv[++i]);
+        }
+        else if (arg == "--font")
+        {
+            if (i+1 >= argc) { std::cerr << "Error: --font requires a PATH\n"; std::exit(1); }
+            config.fontPath = argv[++i];
+        }
+        else if (arg == "--tempo")
+        {
+            if (i+1 >= argc) { std::cerr << "Error: --tempo requires a value\n"; std::exit(1); }
+            config.initialTempo = std::stod(argv[++i]);
+        }
+        else if (arg == "--quantum")
+        {
+            if (i+1 >= argc) { std::cerr << "Error: --quantum requires a value\n"; std::exit(1); }
+            config.quantum = std::stod(argv[++i]);
+        }
+        else if (arg.rfind("--", 0) == 0)
+        {
+            std::cerr << "Error: Unknown option: " << arg << "\n";
+            printUsage(argv[0]);
+            std::exit(1);
+        }
     }
 
     return config;

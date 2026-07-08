@@ -45,6 +45,7 @@ struct Config
     RgbaColor phaseMarkerColor {255, 255, 255, 255};
     int phaseBarHeight = 22;
     int phaseBarSegmentGap = 6;
+    int phaseBarMargin = 24;
 
     // Help overlay
     RgbaColor helpOverlayBackgroundColor {0, 0, 0, 220};
@@ -58,6 +59,11 @@ struct Config
     // These will only be used if the explicit v0.4 keys are not set.
     RgbaColor backgroundColor {18, 18, 18, 255};   // maps to centerBandColor
     RgbaColor bandColor {18, 18, 18, 255};         // maps to topBandColor + bottomBandColor
+
+    // Internal tracking for alias logic (not serialized)
+    bool topBandColorExplicit = false;
+    bool centerBandColorExplicit = false;
+    bool bottomBandColorExplicit = false;
 
     // Runtime
     std::string configPath;
