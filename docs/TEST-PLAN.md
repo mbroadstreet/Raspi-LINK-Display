@@ -1,55 +1,51 @@
-# Test Plan
+# Test Plan (v0.3.6)
 
-## Configure-time checks
-
-Run without Ableton/link installed to confirm CMake fails clearly:
-
-```bash
-cmake -S . -B build
-```
-
-Expected result: CMake reports that `third_party/link/AbletonLinkConfig.cmake` is missing and prints the submodule commands.
-
-## Build checks
-
-After adding Ableton/link and installing SDL2/SDL2_ttf:
+## Build & Basic Runtime
 
 ```bash
 cmake -S . -B build
 cmake --build build -j"$(nproc)"
 ```
 
-## Console smoke test
+## Core Smoke Tests
 
 ```bash
-./build/link-pi-display --no-gui
+./build/link-pi-display --help
+timeout 10 ./build/link-pi-display --no-gui
+./build/link-pi-display --windowed
+./build/link-pi-display
 ```
 
-Expected format:
-
-```text
-LINK Active · No Peers | 120.00 | Beat 0.0 · Phase 0.0 / 4
-```
-
-## GUI smoke test
+## Configuration Tests
 
 ```bash
-./build/link-pi-display --windowed --width 480 --height 320
+# Test with example config
+./build/link-pi-display --config config/link-pi-display.example.conf --windowed
+
+# Test missing config (should use defaults)
+./build/link-pi-display --windowed
 ```
 
-Confirm:
+## F1 Help Overlay (GUI only)
 
-- Top band renders one status line.
-- Center renders large tempo with two decimals and no `BPM` suffix.
-- Bottom renders beat/phase.
-- Escape or `q` exits.
+- Press **F1** → help overlay appears
+- Wait ~8 seconds → overlay disappears automatically
+- Press **Q** or **Esc** → application quits
+- Press **F** → toggles fullscreen/windowed (if supported)
 
-## Link session test
+## Visual Acceptance (v0.3.6)
 
-Join from Ableton Live or another Link-capable peer and confirm:
+- Top status line uses configured color and size
+- Tempo remains two decimals, no BPM suffix
+- Bottom phase meter remains phase-only
+- No beat count or numeric phase text appears
+- Help overlay is readable and times out correctly
 
-- `LINK Active · No Peers` when alone.
-- `LINK Network Devices: N` when remote peers are present.
-- `N` is remote peers only.
-- Tempo follows the Link session.
-- Beat/phase move smoothly.
+## Remote Peer Test
+
+- No peers → `LINK Active · No Peers`
+- One remote peer → `LINK Network Devices: 1`
+
+## Invalid Config Handling (if implemented)
+
+- Invalid color or number should produce a clear warning/error mentioning the key.

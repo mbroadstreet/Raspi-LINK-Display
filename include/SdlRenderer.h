@@ -20,17 +20,23 @@ public:
     bool pollQuit();
     void render(const LinkDisplayState& state);
 
+    void showHelpOverlay();
+    bool isHelpOverlayVisible() const;
+
 private:
     void renderCenteredText(const std::string& text, TTF_Font* font, SDL_Rect area, SDL_Color color);
-    void renderBottomBeatAndPhaseBar(const LinkDisplayState& state,
-                                     const SDL_Rect& area,
-                                     SDL_Color textColor,
-                                     SDL_Color barColor);
+    void renderBottomPhaseBar(const LinkDisplayState& state, const SDL_Rect& area, SDL_Color barColor, SDL_Color markerColor);
+    void renderHelpOverlay();
 
     Config config_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
+
     TTF_Font* statusFont_ = nullptr;
     TTF_Font* tempoFont_ = nullptr;
     TTF_Font* bottomFont_ = nullptr;
+    TTF_Font* helpFont_ = nullptr;
+
+    bool helpOverlayVisible_ = false;
+    Uint32 helpOverlayStartTime_ = 0;
 };
