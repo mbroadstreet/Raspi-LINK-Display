@@ -174,13 +174,38 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             else if (key == "phase_marker_color")        config.phaseMarkerColor = parseRgba(value, key, path, lineNumber);
             else if (key == "phase_bar_height")          config.phaseBarHeight = std::stoi(value);
             else if (key == "phase_bar_segment_gap")     config.phaseBarSegmentGap = std::stoi(value);
-            else if (key == "phase_bar_margin")          config.phaseBarMargin = std::max(0, std::stoi(value));
+            else if (key == "phase_bar_margin")
+            {
+                int m = std::stoi(value);
+                if (m < 0)
+                {
+                    std::cerr << "Error: phase_bar_margin must be >= 0: " << value
+                              << " in " << path << ":" << lineNumber << "\n";
+                    std::exit(1);
+                }
+                // Practical usable width check (if width known at this point)
+                if (config.width > 0 && (m * 2 >= config.width))
+                {
+                    std::cerr << "Error: phase_bar_margin too large for width (leaves no usable bar): " << value
+                              << " in " << path << ":" << lineNumber << "\n";
+                    std::exit(1);
+                }
+                config.phaseBarMargin = m;
+            }
             else if (key == "help_overlay_background_color") config.helpOverlayBackgroundColor = parseRgba(value, key, path, lineNumber);
             else if (key == "help_overlay_text_color")   config.helpOverlayTextColor = parseRgba(value, key, path, lineNumber);
             else if (key == "help_overlay_seconds")      config.helpOverlaySeconds = std::stoi(value);
             else if (key == "hide_mouse_cursor")         config.hideMouseCursor = parseBool(value, key, path, lineNumber);
-            else if (key == "background_color")          config.backgroundColor = parseRgba(value, key, path, lineNumber);
-            else if (key == "band_color")                config.bandColor = parseRgba(value, key, path, lineNumber);
+            else if (key == "background_color")
+            {
+                config.backgroundColor = parseRgba(value, key, path, lineNumber);
+                config.backgroundColorExplicit = true;
+            }
+            else if (key == "band_color")
+            {
+                config.bandColor = parseRgba(value, key, path, lineNumber);
+                config.bandColorExplicit = true;
+            }
             else
             {
                 std::cerr << "Warning: Unknown config key '" << key << "' in " << path << ":" << lineNumber << "\n";
@@ -192,6 +217,23 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             errorCount++;
         }
     }
+}
+
+// Helper to safely get next CLI value or error
+static std::string getRequiredCliValue(int& i, int argc, char** argv, const std::string& option)
+{
+    if (i + 1 >= argc)
+    {
+        std::cerr << "Error: " << option << " requires a value\n";
+        std::exit(1);
+    }
+    std::string val = argv[++i];
+    if (val.rfind("--", 0) == 0)
+    {
+        std::cerr << "Error: " << option << " requires a value\n";
+        std::exit(1);
+    }
+    return val;
 }
 
 // --- Main config parser with correct precedence ---
@@ -243,13 +285,19 @@ Config parseConfig(int argc, char** argv)
         }
     }
 
-    // === Apply legacy alias fallback logic (only if explicit new keys not set) ===
-    if (!config.topBandColorExplicit)
-        config.topBandColor = config.bandColor;
-    if (!config.centerBandColorExplicit)
+    // === Apply legacy alias fallback logic ONLY if the deprecated alias was explicitly present ===
+    // This preserves built-in v0.4 defaults when no config or no alias keys are used.
+    if (config.backgroundColorExplicit && !config.centerBandColorExplicit)
+    {
         config.centerBandColor = config.backgroundColor;
-    if (!config.bottomBandColorExplicit)
-        config.bottomBandColor = config.bandColor;
+    }
+    if (config.bandColorExplicit)
+    {
+        if (!config.topBandColorExplicit)
+            config.topBandColor = config.bandColor;
+        if (!config.bottomBandColorExplicit)
+            config.bottomBandColor = config.bandColor;
+    }
 
     // === Pass 2: Apply all CLI overrides (strict) ===
     for (int i = 1; i < argc; ++i)
@@ -259,30 +307,60 @@ Config parseConfig(int argc, char** argv)
         if (arg == "--help" || arg == "-h") { printUsage(argv[0]); std::exit(0); }
         else if (arg == "--no-gui")               config.noGui = true;
         else if (arg == "--windowed")             config.fullscreen = false;
+        else if (arg == "--config")
+        {
+            // Skip --config VALUE in pass 2 (already handled in pass 1). Validate for safety.
+            if (i + 1 >= argc || std::string(argv[i+1]).rfind("--", 0) == 0)
+            {
+                std::cerr << "Error: --config requires a PATH argument\n";
+                std::exit(1);
+            }
+            ++i;  // skip the path value
+            continue;
+        }
         else if (arg == "--width")
         {
-            if (i+1 >= argc) { std::cerr << "Error: --width requires a value\n"; std::exit(1); }
-            config.width = std::stoi(argv[++i]);
+            std::string val = getRequiredCliValue(i, argc, argv, "--width");
+            try {
+                config.width = std::stoi(val);
+            } catch (...) {
+                std::cerr << "Error: --width requires a numeric value\n";
+                std::exit(1);
+            }
         }
         else if (arg == "--height")
         {
-            if (i+1 >= argc) { std::cerr << "Error: --height requires a value\n"; std::exit(1); }
-            config.height = std::stoi(argv[++i]);
+            std::string val = getRequiredCliValue(i, argc, argv, "--height");
+            try {
+                config.height = std::stoi(val);
+            } catch (...) {
+                std::cerr << "Error: --height requires a numeric value\n";
+                std::exit(1);
+            }
         }
         else if (arg == "--font")
         {
-            if (i+1 >= argc) { std::cerr << "Error: --font requires a PATH\n"; std::exit(1); }
-            config.fontPath = argv[++i];
+            config.fontPath = getRequiredCliValue(i, argc, argv, "--font");
         }
         else if (arg == "--tempo")
         {
-            if (i+1 >= argc) { std::cerr << "Error: --tempo requires a value\n"; std::exit(1); }
-            config.initialTempo = std::stod(argv[++i]);
+            std::string val = getRequiredCliValue(i, argc, argv, "--tempo");
+            try {
+                config.initialTempo = std::stod(val);
+            } catch (...) {
+                std::cerr << "Error: --tempo requires a numeric value\n";
+                std::exit(1);
+            }
         }
         else if (arg == "--quantum")
         {
-            if (i+1 >= argc) { std::cerr << "Error: --quantum requires a value\n"; std::exit(1); }
-            config.quantum = std::stod(argv[++i]);
+            std::string val = getRequiredCliValue(i, argc, argv, "--quantum");
+            try {
+                config.quantum = std::stod(val);
+            } catch (...) {
+                std::cerr << "Error: --quantum requires a numeric value\n";
+                std::exit(1);
+            }
         }
         else if (arg.rfind("--", 0) == 0)
         {

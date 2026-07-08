@@ -64,6 +64,8 @@ struct Config
     bool topBandColorExplicit = false;
     bool centerBandColorExplicit = false;
     bool bottomBandColorExplicit = false;
+    bool backgroundColorExplicit = false;
+    bool bandColorExplicit = false;
 
     // Runtime
     std::string configPath;
