@@ -77,10 +77,19 @@ SdlRenderer::SdlRenderer(const Config& config)
     require(tempoFont_ != nullptr, std::string("TTF_OpenFont tempo failed: ") + TTF_GetError());
     require(bottomFont_ != nullptr, std::string("TTF_OpenFont bottom failed: ") + TTF_GetError());
     require(helpFont_ != nullptr, std::string("TTF_OpenFont help failed: ") + TTF_GetError());
+
+    // Hide mouse cursor in fullscreen if requested
+    if (config_.fullscreen && config_.hideMouseCursor)
+    {
+        SDL_ShowCursor(SDL_DISABLE);
+    }
 }
 
 SdlRenderer::~SdlRenderer()
 {
+    // Restore cursor on exit if it was hidden
+    SDL_ShowCursor(SDL_ENABLE);
+
     if (helpFont_) TTF_CloseFont(helpFont_);
     if (bottomFont_) TTF_CloseFont(bottomFont_);
     if (tempoFont_) TTF_CloseFont(tempoFont_);
@@ -118,15 +127,20 @@ bool SdlRenderer::pollQuit()
 
             if (key == SDLK_f)
             {
-                // Toggle fullscreen/windowed (runtime only, does not save config)
                 Uint32 flags = SDL_GetWindowFlags(window_);
-                if (flags & SDL_WINDOW_FULLSCREEN_DESKTOP)
+                bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+
+                if (isFullscreen)
                 {
                     SDL_SetWindowFullscreen(window_, 0);
+                    if (config_.hideMouseCursor)
+                        SDL_ShowCursor(SDL_ENABLE);
                 }
                 else
                 {
                     SDL_SetWindowFullscreen(window_, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                    if (config_.hideMouseCursor)
+                        SDL_ShowCursor(SDL_DISABLE);
                 }
             }
         }
@@ -179,8 +193,8 @@ void SdlRenderer::renderCenteredText(const std::string& text, TTF_Font* font, SD
 
 void SdlRenderer::render(const LinkDisplayState& state)
 {
-    int outputW = config_.width;
-    int outputH = config_.height;
+    int outputW = 0;
+    int outputH = 0;
     SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
 
     const int topPadding = 18;
@@ -192,18 +206,33 @@ void SdlRenderer::render(const LinkDisplayState& state)
     const SDL_Rect centerBand {0, topBand.y + topBand.h + 8, outputW, outputH - topBandHeight - bottomBandHeight - topPadding - bottomPadding - 16};
     const SDL_Rect bottomBand {0, outputH - bottomBandHeight - bottomPadding, outputW, bottomBandHeight};
 
-    SDL_SetRenderDrawColor(renderer_, config_.backgroundColor.r, config_.backgroundColor.g, config_.backgroundColor.b, config_.backgroundColor.a);
+    // Background
+    SDL_SetRenderDrawColor(renderer_,
+        config_.backgroundColor.r,
+        config_.backgroundColor.g,
+        config_.backgroundColor.b,
+        config_.backgroundColor.a);
     SDL_RenderClear(renderer_);
 
-    SDL_SetRenderDrawColor(renderer_, config_.bandColor.r, config_.bandColor.g, config_.bandColor.b, config_.bandColor.a);
+    // Bands
+    SDL_SetRenderDrawColor(renderer_, toSDL(config_.topBandColor).r, toSDL(config_.topBandColor).g, toSDL(config_.topBandColor).b, toSDL(config_.topBandColor).a);
     SDL_RenderFillRect(renderer_, &topBand);
+
+    SDL_SetRenderDrawColor(renderer_, toSDL(config_.bottomBandColor).r, toSDL(config_.bottomBandColor).g, toSDL(config_.bottomBandColor).b, toSDL(config_.bottomBandColor).a);
     SDL_RenderFillRect(renderer_, &bottomBand);
 
-    const SDL_Color statusColor = (state.linkEnabled && state.remotePeers > 0)
-        ? toSDL(config_.statusConnectedColor)
-        : toSDL(config_.statusNoPeersColor);
+    // Status color selection
+    SDL_Color statusColor;
+    std::string statusText = DisplayText::formatStatusLine(state);
 
-    renderCenteredText(DisplayText::formatStatusLine(state), statusFont_, topBand, statusColor);
+    if (statusText == "LINK Inactive")
+        statusColor = toSDL(config_.statusInactiveColor);
+    else if (statusText == "LINK Active · No Peers")
+        statusColor = toSDL(config_.statusNoPeersColor);
+    else
+        statusColor = toSDL(config_.statusConnectedColor);
+
+    renderCenteredText(statusText, statusFont_, topBand, statusColor);
     renderCenteredText(DisplayText::formatTempoLine(state), tempoFont_, centerBand, toSDL(config_.tempoColor));
     renderBottomPhaseBar(state, bottomBand, toSDL(config_.phaseBarColor), toSDL(config_.phaseMarkerColor));
 
@@ -276,12 +305,17 @@ void SdlRenderer::renderHelpOverlay()
         return;
     }
 
+    int outputW = 0, outputH = 0;
+    SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
+
     const int w = 280;
     const int h = 70;
-    const int x = (config_.width - w) / 2;
+    const int x = (outputW - w) / 2;
     const int y = 20;
 
     SDL_Rect bg {x, y, w, h};
+
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer_,
         config_.helpOverlayBackgroundColor.r,
         config_.helpOverlayBackgroundColor.g,
