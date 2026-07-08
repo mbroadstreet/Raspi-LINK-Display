@@ -2,12 +2,14 @@
 
 A minimal C++17 Raspberry Pi display foundation for monitoring Ableton Link session data.
 
-## Features (v0.3.6)
+## Features (v0.4)
 
 - Real-time Link tempo, beat, and phase display
 - Remote peer count (does not count the display itself)
 - F1 help overlay (GUI mode)
 - User-editable configuration file for colors, fonts, and layout
+- Configurable top/center/bottom band background colors
+- Optional mouse cursor hiding in fullscreen
 - Manual-start operation
 
 ## Quick Start
@@ -36,7 +38,7 @@ Using a custom config:
 
 ## Configuration
 
-Copy the example config and edit it:
+Copy the example config:
 
 ```bash
 cp config/link-pi-display.example.conf config/link-pi-display.conf
@@ -45,6 +47,20 @@ cp config/link-pi-display.example.conf config/link-pi-display.conf
 Then edit `config/link-pi-display.conf`.
 
 The application will use built-in defaults if no config file is present.
+
+### v0.4 Band Colors
+
+- `top_band_color` — Background color of the top status band (default: black)
+- `center_band_color` — Background color of the center tempo band (default: dark grey)
+- `bottom_band_color` — Background color of the bottom phase meter band (default: black)
+
+These defaults are intentional for better readability on small Raspberry Pi TFT displays.
+
+### Deprecated Aliases
+
+The older keys `background_color` and `band_color` are still accepted as compatibility aliases but are deprecated. Use the explicit `top_band_color`, `center_band_color`, and `bottom_band_color` keys going forward.
+
+CLI options always override values from the config file.
 
 ## Documentation
 

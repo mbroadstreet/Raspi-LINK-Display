@@ -29,26 +29,37 @@ struct Config
     int bottomFontSize = 25;
     int helpFontSize = 20;
 
-    // Colors
+    // Colors - v0.4 explicit band colors
+    RgbaColor topBandColor {0, 0, 0, 255};
+    RgbaColor centerBandColor {18, 18, 18, 255};
+    RgbaColor bottomBandColor {0, 0, 0, 255};
+
+    // Status colors
     RgbaColor statusInactiveColor {40, 44, 48, 255};
     RgbaColor statusNoPeersColor {40, 44, 48, 255};
     RgbaColor statusConnectedColor {75, 85, 95, 255};
     RgbaColor tempoColor {64, 79, 96, 255};
-    RgbaColor phaseBarColor {83, 114, 151, 255};
-    RgbaColor phaseMarkerColor {255, 255, 255, 255};
-    RgbaColor backgroundColor {0, 0, 0, 255};
-    RgbaColor bandColor {18, 18, 18, 255};
-    RgbaColor helpOverlayBackgroundColor {0, 0, 0, 220};
-    RgbaColor helpOverlayTextColor {210, 210, 210, 255};
 
     // Phase meter
+    RgbaColor phaseBarColor {83, 114, 151, 255};
+    RgbaColor phaseMarkerColor {255, 255, 255, 255};
     int phaseBarHeight = 22;
     int phaseBarSegmentGap = 6;
 
     // Help overlay
+    RgbaColor helpOverlayBackgroundColor {0, 0, 0, 220};
+    RgbaColor helpOverlayTextColor {210, 210, 210, 255};
     int helpOverlaySeconds = 8;
 
-    // Config file path (runtime)
+    // Fullscreen behavior
+    bool hideMouseCursor = true;
+
+    // Deprecated compatibility aliases (v0.4)
+    // These will only be used if the explicit v0.4 keys are not set.
+    RgbaColor backgroundColor {18, 18, 18, 255};   // maps to centerBandColor
+    RgbaColor bandColor {18, 18, 18, 255};         // maps to topBandColor + bottomBandColor
+
+    // Runtime
     std::string configPath;
 };
 
