@@ -2,6 +2,18 @@
 
 A minimal C++17 Raspberry Pi display foundation for monitoring Ableton Link session data.
 
+## v0.4 Status
+
+**Pi-validated release.**
+
+- Validated commit: `a79db44`
+- Validated tag: `v0.4-pi-validated`
+- Validated branch: `v0.4-pi-validated`
+- Original development branch: `v0.4-config-runtime-visual-polish`
+- Commit message: `v0.4: Require whole-string numeric parsing`
+
+**Note:** The name `v0.4-pi-validated` exists as both a branch and a tag. When ambiguity matters, use the exact commit `a79db44` or fully qualified refs (e.g. `refs/tags/v0.4-pi-validated`).
+
 ## Features (v0.4)
 
 - Real-time Link tempo, beat, and phase display
@@ -66,6 +78,10 @@ CLI options always override values from the config file.
 
 - [UI Specification](docs/UI-SPEC.md)
 - [Test Plan](docs/TEST-PLAN.md)
+- [Changelog](CHANGELOG.md)
+- [Roadmap](ROADMAP.md)
+- [Module Contract](docs/MODULE-CONTRACT.md)
+- [Integration Notes](docs/INTEGRATION-NOTES.md)
 - Example config: `config/link-pi-display.example.conf`
 
 ## License
