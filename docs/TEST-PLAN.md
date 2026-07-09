@@ -1,5 +1,7 @@
 # Test Plan (v0.4)
 
+**v0.4 is Pi-validated at commit a79db44 (tag v0.4-pi-validated).**
+
 ## Build & Basic Runtime
 
 ```bash
@@ -30,56 +32,3 @@ cp config/link-pi-display.example.conf config/link-pi-display.conf
 # Edit one band color, then run:
 ./build/link-pi-display --config config/link-pi-display.conf --windowed
 ```
-
-## CLI Override Tests
-
-```bash
-# Config file says fullscreen=true, but --windowed should win
-./build/link-pi-display --config config/link-pi-display.example.conf --windowed
-```
-
-## Invalid Config Handling
-
-- Provide an invalid color component (e.g. 999) in a config file and confirm a clear error mentioning the key/value.
-- Provide an invalid number or boolean and confirm useful error output.
-
-## F1 Help Overlay (GUI only)
-
-- Press **F1** → help overlay appears
-- Wait ~8 seconds → overlay disappears automatically
-- Press **Q** or **Esc** → application quits
-- Press **F** → toggles fullscreen/windowed
-
-## Cursor Hiding Behavior
-
-- Start in fullscreen with `hide_mouse_cursor=true` → cursor should be hidden
-- Press **F** to go to windowed → cursor should appear
-- Press **F** again to return to fullscreen → cursor should hide again
-- Set `hide_mouse_cursor=false` and confirm cursor remains visible in fullscreen
-
-## Visual / Layout Acceptance (v0.4)
-
-- Top status band uses `top_band_color`
-- Center tempo band uses `center_band_color`
-- Bottom phase band uses `bottom_band_color`
-- Default v0.4 colors: black top, dark grey center, black bottom
-- Top status line uses configured color and size
-- Tempo remains two decimals, no BPM suffix
-- Bottom phase meter remains phase-only (no beat count or numeric phase text)
-- Help overlay is readable and times out correctly
-
-## Remote Peer Test
-
-- No peers → `LINK Active · No Peers`
-- One remote peer → `LINK Network Devices: 1`
-- Status colors match the displayed state:
-  - `LINK Inactive` → `status_inactive_color`
-  - `LINK Active · No Peers` → `status_no_peers_color`
-  - `LINK Network Devices: N` → `status_connected_color`
-
-## No-Regression Checks
-
-- Link peer display and status text behavior unchanged from v0.3.x
-- Bottom meter remains strictly phase-only
-- Manual-start operation unchanged
-- No changes to LinkEngine, LinkDisplayState, or Ableton link logic
