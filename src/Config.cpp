@@ -229,7 +229,7 @@ std::string findDefaultFontPath()
 }
 
 
- 
+
 
 void printUsage(const char* argv0)
 {

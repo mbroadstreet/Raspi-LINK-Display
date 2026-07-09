@@ -66,13 +66,20 @@ int main(int argc, char** argv)
 
     try
     {
+        // Early --module-info (before any config parsing or runtime start)
+        // This ensures --module-info works even with bad unrelated CLI flags.
+        for (int i = 1; i < argc; ++i)
+        {
+            if (std::string(argv[i]) == "--module-info")
+            {
+                printModuleInfo();
+                return 0;
+            }
+        }
+
         const Config config = parseConfig(argc, argv);
         if (config.printConfig) {
             printEffectiveConfig(config);
-            return 0;
-        }
-        if (config.moduleInfo) {
-            printModuleInfo();
             return 0;
         }
         LinkEngine engine(config.initialTempo, config.quantum);
