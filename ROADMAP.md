@@ -13,10 +13,10 @@
 - No new runtime features in hygiene-focused releases.
 
 ## v0.5 Planned Work
-- Release hygiene and module contract documentation (this release).
-- Config parser test harness.
-- `--print-config` CLI flag.
-- `--module-info` CLI flag.
+- Release hygiene and module contract documentation (Batch 1 - complete).
+- Config parser test harness (Batch 2 - implemented).
+- `--print-config` CLI flag (Batch 2 - implemented).
+- `--module-info` CLI flag (Batch 2 - implemented).
 - Additional screen preset / example configs for common displays.
 
 ## Future Module / Container Direction

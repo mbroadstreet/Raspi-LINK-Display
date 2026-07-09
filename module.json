@@ -8,13 +8,29 @@
   "runtime": "native-cpp-sdl2",
   "language": "c++17",
   "display_target": "480x320",
-  "primary_protocols": ["ableton-link"],
-  "inputs": ["keyboard"],
-  "outputs": ["sdl2-display", "console-no-gui"],
-  "controls": ["F1", "F", "Q", "Esc"],
+  "primary_protocols": [
+    "ableton-link"
+  ],
+  "inputs": [
+    "keyboard"
+  ],
+  "outputs": [
+    "sdl2-display",
+    "console-no-gui"
+  ],
+  "controls": [
+    "F1",
+    "F",
+    "Q",
+    "Esc"
+  ],
   "config_file": "config/link-pi-display.example.conf",
   "external_control": "not implemented",
   "container_integration": "future",
   "manual_start": true,
-  "systemd_enabled": false
+  "systemd_enabled": false,
+  "inspection_commands": [
+    "--print-config",
+    "--module-info"
+  ]
 }

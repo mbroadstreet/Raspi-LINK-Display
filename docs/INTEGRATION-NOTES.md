@@ -65,3 +65,8 @@ See also:
 - `ROADMAP.md`
 - `docs/MODULE-CONTRACT.md`
 - `module.json`
+## Module Inspection (v0.5)
+
+Future container tooling may use `module.json` and the `--module-info` command to discover and inspect modules.
+
+`--print-config` can be used by tooling to inspect effective configuration without starting the module runtime.

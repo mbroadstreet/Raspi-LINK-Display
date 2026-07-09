@@ -45,3 +45,11 @@ This module **must** remain:
 - `container_integration: future`
 
 See also: `ROADMAP.md` and `docs/INTEGRATION-NOTES.md`.
+## Inspection Commands (v0.5)
+
+Standalone modules should expose simple inspection commands to aid validation and future container discovery:
+
+- `--module-info` — prints static metadata
+- `--print-config` — prints the effective runtime configuration
+
+These commands must exit without starting the main runtime (no SDL window, no Link session).
