@@ -16,7 +16,7 @@ A minimal C++17 Raspberry Pi display foundation for monitoring Ableton Link sess
 
 ## Features (v0.4)
 
-- Real-time Link tempo, beat, and phase display
+- Real-time Link tempo, peer count, and phase display
 - Remote peer count (does not count the display itself)
 - F1 help overlay (GUI mode)
 - User-editable configuration file for colors, fonts, and layout
