@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <iomanip>
 
 namespace fs = std::filesystem;
 
@@ -227,6 +228,9 @@ std::string findDefaultFontPath()
     return {};
 }
 
+
+ 
+
 void printUsage(const char* argv0)
 {
     std::cout
@@ -240,6 +244,8 @@ void printUsage(const char* argv0)
         << "  --tempo BPM               Initial tempo before joining a session.\n"
         << "  --quantum BEATS           Phase quantum.\n"
         << "  --config PATH             Path to config file.\n"
+        << "  --print-config            Print effective configuration and exit.\n"
+        << "  --module-info             Print module metadata and exit.\n"
         << "  --help                    Show this help.\n";
 }
 
@@ -433,6 +439,8 @@ Config parseConfig(int argc, char** argv)
         std::string arg = argv[i];
 
         if (arg == "--help" || arg == "-h") { printUsage(argv[0]); std::exit(0); }
+        else if (arg == "--print-config")     config.printConfig = true;
+        else if (arg == "--module-info")      config.moduleInfo = true;
         else if (arg == "--no-gui")               config.noGui = true;
         else if (arg == "--windowed")             config.fullscreen = false;
         else if (arg == "--config")
@@ -478,4 +486,61 @@ Config parseConfig(int argc, char** argv)
     }
 
     return config;
+}
+
+// --- v0.5 inspection functions ---
+
+void printEffectiveConfig(const Config& config)
+{
+    std::cout
+        << "width=" << config.width << "\n"
+        << "height=" << config.height << "\n"
+        << "fullscreen=" << (config.fullscreen ? "true" : "false") << "\n"
+        << "no_gui=" << (config.noGui ? "true" : "false") << "\n"
+        << "tempo=" << std::fixed << std::setprecision(2) << config.initialTempo << "\n"
+        << "quantum=" << std::fixed << std::setprecision(2) << config.quantum << "\n"
+        << "font_path=" << config.fontPath << "\n"
+        << "status_font_size=" << config.statusFontSize << "\n"
+        << "tempo_font_size=" << config.tempoFontSize << "\n"
+        << "bottom_font_size=" << config.bottomFontSize << "\n"
+        << "help_font_size=" << config.helpFontSize << "\n"
+        << "status_inactive_color=" << config.statusInactiveColor.r << "," << config.statusInactiveColor.g << "," << config.statusInactiveColor.b << "," << config.statusInactiveColor.a << "\n"
+        << "status_no_peers_color=" << config.statusNoPeersColor.r << "," << config.statusNoPeersColor.g << "," << config.statusNoPeersColor.b << "," << config.statusNoPeersColor.a << "\n"
+        << "status_connected_color=" << config.statusConnectedColor.r << "," << config.statusConnectedColor.g << "," << config.statusConnectedColor.b << "," << config.statusConnectedColor.a << "\n"
+        << "tempo_color=" << config.tempoColor.r << "," << config.tempoColor.g << "," << config.tempoColor.b << "," << config.tempoColor.a << "\n"
+        << "phase_bar_color=" << config.phaseBarColor.r << "," << config.phaseBarColor.g << "," << config.phaseBarColor.b << "," << config.phaseBarColor.a << "\n"
+        << "phase_marker_color=" << config.phaseMarkerColor.r << "," << config.phaseMarkerColor.g << "," << config.phaseMarkerColor.b << "," << config.phaseMarkerColor.a << "\n"
+        << "top_band_color=" << config.topBandColor.r << "," << config.topBandColor.g << "," << config.topBandColor.b << "," << config.topBandColor.a << "\n"
+        << "center_band_color=" << config.centerBandColor.r << "," << config.centerBandColor.g << "," << config.centerBandColor.b << "," << config.centerBandColor.a << "\n"
+        << "bottom_band_color=" << config.bottomBandColor.r << "," << config.bottomBandColor.g << "," << config.bottomBandColor.b << "," << config.bottomBandColor.a << "\n"
+        << "help_overlay_background_color=" << config.helpOverlayBackgroundColor.r << "," << config.helpOverlayBackgroundColor.g << "," << config.helpOverlayBackgroundColor.b << "," << config.helpOverlayBackgroundColor.a << "\n"
+        << "help_overlay_text_color=" << config.helpOverlayTextColor.r << "," << config.helpOverlayTextColor.g << "," << config.helpOverlayTextColor.b << "," << config.helpOverlayTextColor.a << "\n"
+        << "phase_bar_height=" << config.phaseBarHeight << "\n"
+        << "phase_bar_segment_gap=" << config.phaseBarSegmentGap << "\n"
+        << "phase_bar_margin=" << config.phaseBarMargin << "\n"
+        << "help_overlay_seconds=" << config.helpOverlaySeconds << "\n"
+        << "hide_mouse_cursor=" << (config.hideMouseCursor ? "true" : "false") << "\n";
+}
+
+void printModuleInfo()
+{
+    std::cout
+        << "module_name=raspi-link-display\n"
+        << "display_name=Raspberry Pi Ableton Link Display\n"
+        << "module_type=display\n"
+        << "version=0.4.0\n"
+        << "validated_tag=v0.4-pi-validated\n"
+        << "validated_commit=a79db44\n"
+        << "runtime=native-cpp-sdl2\n"
+        << "language=c++17\n"
+        << "display_target=480x320\n"
+        << "primary_protocols=ableton-link\n"
+        << "inputs=keyboard\n"
+        << "outputs=sdl2-display,console-no-gui\n"
+        << "controls=F1,F,Q,Esc\n"
+        << "config_file=config/link-pi-display.example.conf\n"
+        << "external_control=not implemented\n"
+        << "container_integration=future\n"
+        << "manual_start=true\n"
+        << "systemd_enabled=false\n";
 }

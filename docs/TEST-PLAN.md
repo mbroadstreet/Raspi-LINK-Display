@@ -85,3 +85,46 @@ cp config/link-pi-display.example.conf config/link-pi-display.conf
 - Bottom meter remains strictly phase-only
 - Manual-start operation unchanged
 - No changes to LinkEngine, LinkDisplayState, or Ableton link logic
+
+## v0.5 Inspection and Test Commands
+
+### Config Parser Tests
+
+```bash
+cmake --build build --target config_parser_tests -j"$(nproc)"
+./build/config_parser_tests
+```
+
+### --module-info
+
+```bash
+./build/link-pi-display --module-info
+```
+
+Should print module metadata and exit without starting SDL or Link.
+
+### --print-config
+
+```bash
+./build/link-pi-display --print-config
+./build/link-pi-display --config config/link-pi-display.example.conf --windowed --print-config
+```
+
+Should print effective config (key=value) and exit without SDL or Link.
+
+### Negative Validation Tests (with --print-config)
+
+These should fail with clear error and non-zero exit, without starting SDL or Link:
+
+```bash
+./build/link-pi-display --width 480abc --print-config
+./build/link-pi-display --tempo -1 --print-config
+./build/link-pi-display --config /tmp/does-not-exist.conf --print-config
+```
+
+## No-Regression for v0.5
+
+- Normal runtime behavior unchanged (GUI and --no-gui still work)
+- --help includes the new options
+- Config defaults unchanged
+- Existing v0.4 tests still valid

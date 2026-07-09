@@ -69,9 +69,17 @@ struct Config
 
     // Runtime
     std::string configPath;
+
+    // v0.5 inspection modes (early exit)
+    bool printConfig = false;
+    bool moduleInfo = false;
 };
 
 Config parseConfig(int argc, char** argv);
 std::string findDefaultFontPath();
 void printUsage(const char* argv0);
 RgbaColor parseRgbaColor(const std::string& value, const RgbaColor& fallback);
+
+// v0.5 inspection helpers
+void printEffectiveConfig(const Config& config);
+void printModuleInfo();

@@ -67,6 +67,14 @@ int main(int argc, char** argv)
     try
     {
         const Config config = parseConfig(argc, argv);
+        if (config.printConfig) {
+            printEffectiveConfig(config);
+            return 0;
+        }
+        if (config.moduleInfo) {
+            printModuleInfo();
+            return 0;
+        }
         LinkEngine engine(config.initialTempo, config.quantum);
 
         if (config.noGui)

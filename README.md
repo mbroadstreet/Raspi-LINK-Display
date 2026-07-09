@@ -73,6 +73,25 @@ These defaults are intentional for better readability on small Raspberry Pi TFT 
 The older keys `background_color` and `band_color` are still accepted as compatibility aliases but are deprecated. Use the explicit `top_band_color`, `center_band_color`, and `bottom_band_color` keys going forward.
 
 CLI options always override values from the config file.
+n## Inspection Commands (v0.5)
+
+- `--print-config` — Print the effective configuration (after defaults, config file, and CLI overrides) and exit.
+- `--module-info` — Print static module metadata and exit.
+
+Example:
+
+```bash
+./build/link-pi-display --print-config
+./build/link-pi-display --module-info
+./build/link-pi-display --config config/link-pi-display.example.conf --windowed --print-config
+```
+
+Config parser tests:
+
+```bash
+cmake --build build --target config_parser_tests -j"$(nproc)"
+./build/config_parser_tests
+```
 
 ## Documentation
 

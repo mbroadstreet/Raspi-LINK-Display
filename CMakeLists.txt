@@ -55,3 +55,21 @@ target_compile_options(link-pi-display
 )
 
 install(TARGETS link-pi-display DESTINATION bin)
+
+# v0.5 config parser test harness (standalone, no SDL/Link required)
+add_executable(config_parser_tests
+    tests/config_parser_tests.cpp
+    src/Config.cpp
+)
+
+target_include_directories(config_parser_tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
+target_compile_options(config_parser_tests
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+)
