@@ -1,4 +1,5 @@
 #include "SdlRenderer.h"
+#include "Config.h"
 
 #include "DisplayText.h"
 
