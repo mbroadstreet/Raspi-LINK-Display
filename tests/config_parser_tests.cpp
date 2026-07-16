@@ -361,7 +361,7 @@ color_preset.custom.tempo_color=100,100,100,255
     {
         std::ofstream tmp("/tmp/test_no_presets_key.conf");
         tmp << "width=640
-";  // some other key, no color_presets
+";  // some other key, no color_presets  // repair verified
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_no_presets_key.conf"});
         expect("file_omits_presets_keeps_builtin", c.colorPresetNames.size() == 2 && c.colorPresetNames[0] == "default");
