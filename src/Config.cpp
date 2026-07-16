@@ -414,6 +414,12 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             // v0.6 Color Presets (dot-prefixed only)
             else if (key == "color_presets")
             {
+                // File provides color_presets= : replace built-ins (or disable if empty value)
+                config.colorPresetNames.clear();
+                config.colorPresetLabels.clear();
+                config.colorPresetOverrides.clear();
+                config.initialColorPreset.clear();
+
                 std::vector<std::string> parsedPresets;
                 std::istringstream ss(value);
                 std::string token;
@@ -524,6 +530,25 @@ Config parseConfig(int argc, char** argv)
 {
     Config config;
     config.fontPath = findDefaultFontPath();
+
+    // v0.6 Built-in color presets (active when no config file or file omits color_presets=)
+    config.colorPresetNames = {"default", "high_contrast"};
+    config.colorPresetLabels["default"] = "Default";
+    config.colorPresetLabels["high_contrast"] = "High Contrast";
+    config.initialColorPreset = "default";
+
+    // Built-in high_contrast provides overrides (default is label-only, uses base colors)
+    config.colorPresetOverrides["high_contrast"]["status_inactive_color"] = {220, 220, 220, 255};
+    config.colorPresetOverrides["high_contrast"]["status_no_peers_color"] = {220, 220, 220, 255};
+    config.colorPresetOverrides["high_contrast"]["status_connected_color"] = {255, 255, 255, 255};
+    config.colorPresetOverrides["high_contrast"]["tempo_color"] = {255, 255, 255, 255};
+    config.colorPresetOverrides["high_contrast"]["phase_bar_color"] = {255, 255, 255, 255};
+    config.colorPresetOverrides["high_contrast"]["phase_marker_color"] = {0, 0, 0, 255};
+    config.colorPresetOverrides["high_contrast"]["top_band_color"] = {0, 0, 0, 255};
+    config.colorPresetOverrides["high_contrast"]["center_band_color"] = {0, 0, 0, 255};
+    config.colorPresetOverrides["high_contrast"]["bottom_band_color"] = {0, 0, 0, 255};
+    config.colorPresetOverrides["high_contrast"]["help_overlay_background_color"] = {0, 0, 0, 230};
+    config.colorPresetOverrides["high_contrast"]["help_overlay_text_color"] = {255, 255, 255, 255};
 
     std::string configFilePath;
     bool configFileExplicitlyRequested = false;
