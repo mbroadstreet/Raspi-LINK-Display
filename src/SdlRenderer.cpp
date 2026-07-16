@@ -154,13 +154,11 @@ bool SdlRenderer::pollQuit()
                 }
                 else if (config_.colorPresetNames.size() == 1)
                 {
-                    std::cout << "Only one color preset configured.
-";
+                    std::cout << "Only one color preset configured." << std::endl;
                 }
                 else
                 {
-                    std::cout << "No color presets configured.
-";
+                    std::cout << "No color presets configured." << std::endl;
                 }
             }
         }
