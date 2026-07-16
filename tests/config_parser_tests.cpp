@@ -370,7 +370,7 @@ color_preset.custom.tempo_color=100,100,100,255
 
     // config file with color_presets= (empty) disables
     {
-        std::ofstream tmp("/tmp/test_empty_presets.conf");
+        tmp << "color_presets=
         tmp << "color_presets=
 ";
         tmp.close();
