@@ -198,3 +198,78 @@ int main(int argc, char** argv)
         return 1;
     }
 }
+
+// === v0.6 Color Preset tests ===
+
+    {
+        // Good: basic presets via temp file
+        std::ofstream tmp("/tmp/test_presets_good.conf");
+        tmp << "color_presets=default,high_contrast\n";
+        tmp << "color_preset=default\n";
+        tmp << "color_preset.default.name=Default\n";
+        tmp << "color_preset.default.tempo_color=64,79,96,255\n";
+        tmp << "color_preset.high_contrast.name=High Contrast\n";
+        tmp << "color_preset.high_contrast.tempo_color=255,255,255,255\n";
+        tmp.close();
+
+        Config c = parse_for_test({"test", "--config", "/tmp/test_presets_good.conf"});
+        expect("presets_list_size", c.colorPresetNames.size() == 2);
+        expect("presets_initial", c.initialColorPreset == "default");
+        expect("presets_active_name", getActiveColorPresetName(c) == "default");
+        expect("presets_tempo_default", c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
+
+        std::remove("/tmp/test_presets_good.conf");
+    }
+
+    {
+        // Negative: unknown initial preset
+        std::ofstream tmp("/tmp/test_bad_initial_preset.conf");
+        tmp << "color_presets=default\n";
+        tmp << "color_preset=nonexistent\n";
+        tmp.close();
+
+        int rc = run_child("bad_initial_preset", {"--config", "/tmp/test_bad_initial_preset.conf"});
+        expect("bad_initial_preset_fails", rc != 0);
+        std::remove("/tmp/test_bad_initial_preset.conf");
+    }
+
+    {
+        // Negative: non-color key inside preset (e.g. width)
+        std::ofstream tmp("/tmp/test_bad_preset_key.conf");
+        tmp << "color_presets=bad\n";
+        tmp << "color_preset.bad.width=999\n";
+        tmp.close();
+
+        int rc = run_child("bad_preset_noncolor_key", {"--config", "/tmp/test_bad_preset_key.conf"});
+        expect("bad_preset_noncolor_key_fails", rc != 0);
+        std::remove("/tmp/test_bad_preset_key.conf");
+    }
+
+    {
+        // Good: inheritance (only override some colors)
+        std::ofstream tmp("/tmp/test_preset_inherit.conf");
+        tmp << "tempo_color=10,20,30,255\n";  // base
+        tmp << "color_presets=dim\n";
+        tmp << "color_preset=dim\n";
+        tmp << "color_preset.dim.name=Dim\n";
+        tmp << "color_preset.dim.tempo_color=120,120,120,255\n";
+        tmp.close();
+
+        Config c = parse_for_test({"test", "--config", "/tmp/test_preset_inherit.conf"});
+        expect("preset_inherit_tempo", c.tempoColor.r == 120 && c.tempoColor.g == 120 && c.tempoColor.b == 120);
+        // Other colors should still have base if not overridden (we rely on apply only overriding listed)
+
+        std::remove("/tmp/test_preset_inherit.conf");
+    }
+
+    if (failures == 0)
+    {
+        std::cout << "\nAll tests passed!\n";
+    }
+    else
+    {
+        std::cout << "\n" << failures << " test(s) failed.\n";
+    }
+
+    return failures;
+}

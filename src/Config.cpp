@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <map>
 #include <iomanip>
 
 namespace fs = std::filesystem;
@@ -341,6 +343,69 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 config.bandColor = parseRgba(value, key, path, lineNumber);
                 config.bandColorExplicit = true;
             }
+            // v0.6 Color Presets (dot-prefixed only)
+            else if (key == "color_presets")
+            {
+                config.colorPresetNames.clear();
+                std::istringstream ss(value);
+                std::string token;
+                while (std::getline(ss, token, ','))
+                {
+                    std::string t = trim(token);
+                    if (!t.empty())
+                    {
+                        if (!isValidPresetId(t))
+                        {
+                            std::cerr << "Error: Invalid color preset ID '" << t << "' in " << path << ":" << lineNumber << "
+";
+                            std::exit(1);
+                        }
+                        config.colorPresetNames.push_back(t);
+                    }
+                }
+            }
+            else if (key == "color_preset")
+            {
+                std::string id = trim(value);
+                if (!isValidPresetId(id))
+                {
+                    std::cerr << "Error: Invalid color preset ID '" << id << "' in " << path << ":" << lineNumber << "
+";
+                    std::exit(1);
+                }
+                config.initialColorPreset = id;
+            }
+            else if (key.rfind("color_preset.", 0) == 0)
+            {
+                std::string rest = key.substr(13);
+                size_t dot = rest.find('.');
+                if (dot == std::string::npos)
+                {
+                    std::cerr << "Error: Invalid color preset key format '" << key << "' in " << path << ":" << lineNumber << "
+";
+                    std::exit(1);
+                }
+                std::string presetId = rest.substr(0, dot);
+                std::string subkey = rest.substr(dot + 1);
+
+                if (!isValidPresetId(presetId))
+                {
+                    std::cerr << "Error: Invalid color preset ID '" << presetId << "' in " << path << ":" << lineNumber << "
+";
+                    std::exit(1);
+                }
+
+                std::string field = colorKeyToField(subkey);
+                if (field.empty())
+                {
+                    std::cerr << "Error: Unknown color key '" << subkey << "' in preset '" << presetId << "' in " << path << ":" << lineNumber << "
+";
+                    std::exit(1);
+                }
+
+                RgbaColor col = parseRgba(value, key, path, lineNumber);
+                registerPresetColor(config, presetId, subkey, col, path, lineNumber);
+            }
             else
             {
                 std::cerr << "Warning: Unknown config key '" << key << "' in " << path << ":" << lineNumber << "\n";
@@ -483,6 +548,31 @@ Config parseConfig(int argc, char** argv)
             printUsage(argv[0]);
             std::exit(1);
         }
+    }
+
+    // v0.6: Apply initial color preset if defined
+    if (!config.colorPresetNames.empty())
+    {
+        std::string startPreset = config.initialColorPreset;
+        if (startPreset.empty())
+        {
+            startPreset = config.colorPresetNames[0];
+        }
+
+        // Validate that the initial preset exists in the list
+        auto it = std::find(config.colorPresetNames.begin(), config.colorPresetNames.end(), startPreset);
+        if (it == config.colorPresetNames.end())
+        {
+            std::cerr << "Error: color_preset '" << startPreset << "' not listed in color_presets
+";
+            std::exit(1);
+        }
+
+        config.activeColorPresetIndex = static_cast<int>(std::distance(config.colorPresetNames.begin(), it));
+        config.activeColorPresetName = startPreset;  // for print
+
+        // Apply overrides on top of base colors
+        applyColorPreset(config, startPreset);
     }
 
     return config;

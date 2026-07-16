@@ -143,6 +143,25 @@ bool SdlRenderer::pollQuit()
                         SDL_ShowCursor(SDL_DISABLE);
                 }
             }
+
+            if (key == SDLK_p)
+            {
+                if (config_.colorPresetNames.size() >= 2)
+                {
+                    cycleColorPreset(config_);
+                    // Re-render will pick up new colors from config_
+                }
+                else if (config_.colorPresetNames.size() == 1)
+                {
+                    std::cout << "Only one color preset configured.
+";
+                }
+                else
+                {
+                    std::cout << "No color presets configured.
+";
+                }
+            }
         }
     }
 
@@ -308,7 +327,7 @@ void SdlRenderer::renderHelpOverlay()
     SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
 
     const int w = 280;
-    const int h = 70;
+    const int h = 90;
     const int x = (outputW - w) / 2;
     const int y = 20;
 
@@ -327,4 +346,5 @@ void SdlRenderer::renderHelpOverlay()
     renderCenteredText("F1 Help", helpFont_, {x, y + 5, w, 22}, textColor);
     renderCenteredText("Q / Esc  Quit", helpFont_, {x, y + 28, w, 20}, textColor);
     renderCenteredText("F        Toggle Fullscreen", helpFont_, {x, y + 48, w, 20}, textColor);
+    renderCenteredText("P        Color preset", helpFont_, {x, y + 68, w, 20}, textColor);
 }

@@ -73,6 +73,14 @@ struct Config
     // v0.5 inspection modes (early exit)
     bool printConfig = false;
     bool moduleInfo = false;
+
+    // v0.6 Color Presets (dot-prefixed syntax only)
+    std::vector<std::string> colorPresetNames;                    // from color_presets= list (order matters)
+    std::string initialColorPreset;                               // from color_preset=
+    std::map<std::string, std::map<std::string, RgbaColor>> colorPresetOverrides;
+
+    // Runtime active preset state (mutable for P key cycling)
+    int activeColorPresetIndex = -1;  // -1 means no presets / use base
 };
 
 Config parseConfig(int argc, char** argv);
@@ -83,3 +91,8 @@ RgbaColor parseRgbaColor(const std::string& value, const RgbaColor& fallback);
 // v0.5 inspection helpers
 void printEffectiveConfig(const Config& config);
 void printModuleInfo();
+
+// v0.6 Color preset helpers
+void applyColorPreset(Config& config, const std::string& presetName);
+void cycleColorPreset(Config& config);
+std::string getActiveColorPresetName(const Config& config);
