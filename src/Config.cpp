@@ -459,6 +459,20 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                     std::exit(1);
                 }
 
+                if (subkey == "name")
+                {
+                    // .name is metadata only, not a color override
+                    std::string label = trim(value);
+                    if (label.empty())
+                    {
+                        std::cerr << "Error: color_preset." << presetId << ".name requires a non-empty value in " << path << ":" << lineNumber << std::endl;
+                        std::exit(1);
+                    }
+                    config.colorPresetLabels[presetId] = label;
+                    // do not store in overrides, do not parse as color
+                    continue;
+                }
+
                 std::string field = colorKeyToField(subkey);
                 if (field.empty())
                 {
