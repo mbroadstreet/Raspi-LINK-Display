@@ -360,8 +360,7 @@ color_preset.custom.tempo_color=100,100,100,255
     // config file with no color_presets= keeps built-ins
     {
         std::ofstream tmp("/tmp/test_no_presets_key.conf");
-        tmp << "width=640
-";  // some other key, no color_presets
+        tmp << "width=640\n";  // some other key, no color_presets
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_no_presets_key.conf"});
         expect("file_omits_presets_keeps_builtin", c.colorPresetNames.size() == 2 && c.colorPresetNames[0] == "default");
@@ -370,9 +369,7 @@ color_preset.custom.tempo_color=100,100,100,255
 
     // config file with color_presets= (empty) disables
     {
-        tmp << "color_presets=
-        tmp << "color_presets=
-";
+        tmp << "color_presets=\n";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_empty_presets.conf"});
         expect("file_empty_presets_disables", c.colorPresetNames.empty());
