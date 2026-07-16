@@ -35,7 +35,8 @@ static std::vector<char*> make_argv(const std::vector<std::string>& args)
 // Run a child test case by re-executing self with special flag
 static int run_child(const std::string& case_name, const std::vector<std::string>& args)
 {
-    std::string cmd = "' + std::string(argv[0]) + ' --test-child " + case_name;
+    std::string exe = (argc > 0 ? std::string(argv[0]) : std::string("./config_parser_tests"));
+    std::string cmd = exe + " --test-child " + case_name;
     for (size_t i = 0; i < args.size(); ++i)
     {
         cmd += " " + args[i];
