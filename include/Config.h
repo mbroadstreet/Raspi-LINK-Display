@@ -80,6 +80,7 @@ struct Config
     std::vector<std::string> colorPresetNames;                    // from color_presets= list (order matters)
     std::string initialColorPreset;                               // from color_preset=
     std::map<std::string, std::map<std::string, RgbaColor>> colorPresetOverrides;
+    std::map<std::string, std::string> colorPresetLabels;  // .name metadata only, per ticket
 
     // Runtime active preset state (mutable for P key cycling)
     int activeColorPresetIndex = -1;  // -1 means no presets / use base
