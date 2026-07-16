@@ -10,6 +10,7 @@
 #include <vector>
 #include <algorithm>
 #include <map>
+#include <cctype>
 #include <iomanip>
 
 namespace fs = std::filesystem;
@@ -252,6 +253,73 @@ void printUsage(const char* argv0)
 }
 
 // --- Load config file with strict validation ---
+
+// --- v0.6 Color Preset helper implementations (narrow, per ticket) ---
+
+static bool isValidPresetId(const std::string& id) {
+    if (id.empty()) return false;
+    for (char c : id) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')) return false;
+    }
+    return true;
+}
+
+static std::string colorKeyToField(const std::string& subkey) {
+    if (subkey == "status_inactive_color" ||
+        subkey == "status_no_peers_color" ||
+        subkey == "status_connected_color" ||
+        subkey == "tempo_color" ||
+        subkey == "phase_bar_color" ||
+        subkey == "phase_marker_color" ||
+        subkey == "top_band_color" ||
+        subkey == "center_band_color" ||
+        subkey == "bottom_band_color" ||
+        subkey == "help_overlay_background_color" ||
+        subkey == "help_overlay_text_color") {
+        return subkey;
+    }
+    return "";
+}
+
+static void registerPresetColor(Config& config, const std::string& presetId, const std::string& subkey, const RgbaColor& col, const std::string& /*path*/, int /*lineNumber*/) {
+    config.colorPresetOverrides[presetId][subkey] = col;
+}
+
+void applyColorPreset(Config& config, const std::string& presetName) {
+    auto it = config.colorPresetOverrides.find(presetName);
+    if (it == config.colorPresetOverrides.end()) return;
+    const auto& overrides = it->second;
+    for (const auto& kv : overrides) {
+        const std::string& key = kv.first;
+        const RgbaColor& col = kv.second;
+        if (key == "status_inactive_color") config.statusInactiveColor = col;
+        else if (key == "status_no_peers_color") config.statusNoPeersColor = col;
+        else if (key == "status_connected_color") config.statusConnectedColor = col;
+        else if (key == "tempo_color") config.tempoColor = col;
+        else if (key == "phase_bar_color") config.phaseBarColor = col;
+        else if (key == "phase_marker_color") config.phaseMarkerColor = col;
+        else if (key == "top_band_color") config.topBandColor = col;
+        else if (key == "center_band_color") config.centerBandColor = col;
+        else if (key == "bottom_band_color") config.bottomBandColor = col;
+        else if (key == "help_overlay_background_color") config.helpOverlayBackgroundColor = col;
+        else if (key == "help_overlay_text_color") config.helpOverlayTextColor = col;
+    }
+}
+
+void cycleColorPreset(Config& config) {
+    if (config.colorPresetNames.size() < 2) return;
+    config.activeColorPresetIndex = (config.activeColorPresetIndex + 1) % static_cast<int>(config.colorPresetNames.size());
+    std::string next = config.colorPresetNames[config.activeColorPresetIndex];
+    applyColorPreset(config, next);
+}
+
+std::string getActiveColorPresetName(const Config& config) {
+    if (config.activeColorPresetIndex >= 0 && config.activeColorPresetIndex < static_cast<int>(config.colorPresetNames.size())) {
+        return config.colorPresetNames[config.activeColorPresetIndex];
+    }
+    return "";
+}
+
 static void loadConfigFile(Config& config, const std::string& path, int& errorCount)
 {
     std::ifstream file(path);
@@ -569,7 +637,7 @@ Config parseConfig(int argc, char** argv)
         }
 
         config.activeColorPresetIndex = static_cast<int>(std::distance(config.colorPresetNames.begin(), it));
-        config.activeColorPresetName = startPreset;  // for print
+        // active name derived from activeColorPresetIndex via getActiveColorPresetName
 
         // Apply overrides on top of base colors
         applyColorPreset(config, startPreset);
@@ -583,33 +651,70 @@ Config parseConfig(int argc, char** argv)
 void printEffectiveConfig(const Config& config)
 {
     std::cout
-        << "width=" << config.width << "\n"
-        << "height=" << config.height << "\n"
-        << "fullscreen=" << (config.fullscreen ? "true" : "false") << "\n"
-        << "no_gui=" << (config.noGui ? "true" : "false") << "\n"
-        << "tempo=" << std::fixed << std::setprecision(2) << config.initialTempo << "\n"
-        << "quantum=" << std::fixed << std::setprecision(2) << config.quantum << "\n"
-        << "font_path=" << config.fontPath << "\n"
-        << "status_font_size=" << config.statusFontSize << "\n"
-        << "tempo_font_size=" << config.tempoFontSize << "\n"
-        << "bottom_font_size=" << config.bottomFontSize << "\n"
-        << "help_font_size=" << config.helpFontSize << "\n"
-        << "status_inactive_color=" << config.statusInactiveColor.r << "," << config.statusInactiveColor.g << "," << config.statusInactiveColor.b << "," << config.statusInactiveColor.a << "\n"
-        << "status_no_peers_color=" << config.statusNoPeersColor.r << "," << config.statusNoPeersColor.g << "," << config.statusNoPeersColor.b << "," << config.statusNoPeersColor.a << "\n"
-        << "status_connected_color=" << config.statusConnectedColor.r << "," << config.statusConnectedColor.g << "," << config.statusConnectedColor.b << "," << config.statusConnectedColor.a << "\n"
-        << "tempo_color=" << config.tempoColor.r << "," << config.tempoColor.g << "," << config.tempoColor.b << "," << config.tempoColor.a << "\n"
-        << "phase_bar_color=" << config.phaseBarColor.r << "," << config.phaseBarColor.g << "," << config.phaseBarColor.b << "," << config.phaseBarColor.a << "\n"
-        << "phase_marker_color=" << config.phaseMarkerColor.r << "," << config.phaseMarkerColor.g << "," << config.phaseMarkerColor.b << "," << config.phaseMarkerColor.a << "\n"
-        << "top_band_color=" << config.topBandColor.r << "," << config.topBandColor.g << "," << config.topBandColor.b << "," << config.topBandColor.a << "\n"
-        << "center_band_color=" << config.centerBandColor.r << "," << config.centerBandColor.g << "," << config.centerBandColor.b << "," << config.centerBandColor.a << "\n"
-        << "bottom_band_color=" << config.bottomBandColor.r << "," << config.bottomBandColor.g << "," << config.bottomBandColor.b << "," << config.bottomBandColor.a << "\n"
-        << "help_overlay_background_color=" << config.helpOverlayBackgroundColor.r << "," << config.helpOverlayBackgroundColor.g << "," << config.helpOverlayBackgroundColor.b << "," << config.helpOverlayBackgroundColor.a << "\n"
-        << "help_overlay_text_color=" << config.helpOverlayTextColor.r << "," << config.helpOverlayTextColor.g << "," << config.helpOverlayTextColor.b << "," << config.helpOverlayTextColor.a << "\n"
-        << "phase_bar_height=" << config.phaseBarHeight << "\n"
-        << "phase_bar_segment_gap=" << config.phaseBarSegmentGap << "\n"
-        << "phase_bar_margin=" << config.phaseBarMargin << "\n"
-        << "help_overlay_seconds=" << config.helpOverlaySeconds << "\n"
-        << "hide_mouse_cursor=" << (config.hideMouseCursor ? "true" : "false") << "\n";
+        << "width=" << config.width << "
+"
+        << "height=" << config.height << "
+"
+        << "fullscreen=" << (config.fullscreen ? "true" : "false") << "
+"
+        << "no_gui=" << (config.noGui ? "true" : "false") << "
+"
+        << "tempo=" << std::fixed << std::setprecision(2) << config.initialTempo << "
+"
+        << "quantum=" << std::fixed << std::setprecision(2) << config.quantum << "
+"
+        << "font_path=" << config.fontPath << "
+"
+        << "status_font_size=" << config.statusFontSize << "
+"
+        << "tempo_font_size=" << config.tempoFontSize << "
+"
+        << "bottom_font_size=" << config.bottomFontSize << "
+"
+        << "help_font_size=" << config.helpFontSize << "
+"
+        << "status_inactive_color=" << config.statusInactiveColor.r << "," << config.statusInactiveColor.g << "," << config.statusInactiveColor.b << "," << config.statusInactiveColor.a << "
+"
+        << "status_no_peers_color=" << config.statusNoPeersColor.r << "," << config.statusNoPeersColor.g << "," << config.statusNoPeersColor.b << "," << config.statusNoPeersColor.a << "
+"
+        << "status_connected_color=" << config.statusConnectedColor.r << "," << config.statusConnectedColor.g << "," << config.statusConnectedColor.b << "," << config.statusConnectedColor.a << "
+"
+        << "tempo_color=" << config.tempoColor.r << "," << config.tempoColor.g << "," << config.tempoColor.b << "," << config.tempoColor.a << "
+"
+        << "phase_bar_color=" << config.phaseBarColor.r << "," << config.phaseBarColor.g << "," << config.phaseBarColor.b << "," << config.phaseBarColor.a << "
+"
+        << "phase_marker_color=" << config.phaseMarkerColor.r << "," << config.phaseMarkerColor.g << "," << config.phaseMarkerColor.b << "," << config.phaseMarkerColor.a << "
+"
+        << "top_band_color=" << config.topBandColor.r << "," << config.topBandColor.g << "," << config.topBandColor.b << "," << config.topBandColor.a << "
+"
+        << "center_band_color=" << config.centerBandColor.r << "," << config.centerBandColor.g << "," << config.centerBandColor.b << "," << config.centerBandColor.a << "
+"
+        << "bottom_band_color=" << config.bottomBandColor.r << "," << config.bottomBandColor.g << "," << config.bottomBandColor.b << "," << config.bottomBandColor.a << "
+"
+        << "help_overlay_background_color=" << config.helpOverlayBackgroundColor.r << "," << config.helpOverlayBackgroundColor.g << "," << config.helpOverlayBackgroundColor.b << "," << config.helpOverlayBackgroundColor.a << "
+"
+        << "help_overlay_text_color=" << config.helpOverlayTextColor.r << "," << config.helpOverlayTextColor.g << "," << config.helpOverlayTextColor.b << "," << config.helpOverlayTextColor.a << "
+"
+        << "phase_bar_height=" << config.phaseBarHeight << "
+"
+        << "phase_bar_segment_gap=" << config.phaseBarSegmentGap << "
+"
+        << "phase_bar_margin=" << config.phaseBarMargin << "
+"
+        << "help_overlay_seconds=" << config.helpOverlaySeconds << "
+"
+        << "hide_mouse_cursor=" << (config.hideMouseCursor ? "true" : "false") << "
+";
+
+    std::cout << "color_presets=";
+    for (size_t i = 0; i < config.colorPresetNames.size(); ++i) {
+        if (i > 0) std::cout << ",";
+        std::cout << config.colorPresetNames[i];
+    }
+    std::cout << "
+";
+    std::cout << "active_color_preset=" << getActiveColorPresetName(config) << "
+";
 }
 
 void printModuleInfo()
@@ -627,7 +732,7 @@ void printModuleInfo()
         << "primary_protocols=ableton-link\n"
         << "inputs=keyboard\n"
         << "outputs=sdl2-display,console-no-gui\n"
-        << "controls=F1,F,Q,Esc\n"
+        << "controls=F1,F,P,Q,Esc\n"
         << "config_file=config/link-pi-display.example.conf\n"
         << "external_control=not implemented\n"
         << "container_integration=future\n"
