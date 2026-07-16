@@ -58,4 +58,3 @@ See:
 - `docs/SCREEN-PRESETS.md`
 
 These features are intended to be additive and should not affect launch-time behavior or existing `--print-config` / `--module-info` output beyond planned extensions.
-

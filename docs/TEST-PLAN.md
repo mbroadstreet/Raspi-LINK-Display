@@ -154,4 +154,3 @@ The following areas are identified for future testing once the corresponding fea
 - Verify correct resolution and visual settings are applied at startup.
 
 See `docs/RUNTIME-CONFIG.md` and `docs/SCREEN-PRESETS.md` for the design these tests will validate.
-

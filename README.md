@@ -120,4 +120,3 @@ For details see:
 - `docs/SCREEN-PRESETS.md`
 
 These features are not yet implemented.
-
