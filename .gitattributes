@@ -1,0 +1,28 @@
+# Raspi-LINK-Display line ending policy
+# Enforce LF for all text files for cross-platform consistency (Windows <-> Linux/Pi)
+
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.json text eol=lf
+*.conf text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# Do not touch binary files
+*.ttf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.tar.gz binary
+*.o binary
+*.obj binary
+*.exe binary
+*.dll binary
