@@ -188,6 +188,7 @@ int main(int argc, char** argv)
     expect("bad_tempo_partial_cli", run_child("bad_tempo_partial_cli", {"--tempo", "120abc"}) != 0);
     expect("bad_tempo_partial_cli", run_child("bad_tempo_partial_cli", {"--tempo", "120abc"}) != 0);
 
+
     // === v0.6 Color Preset tests ===
     {
         // Good: basic presets via temp file
@@ -261,6 +262,8 @@ int main(int argc, char** argv)
         Config c = parse_for_test({"test", "--config", "/tmp/test_preset_inherit.conf"});
         expect("preset_inherit_tempo", c.tempoColor.r == 120 && c.tempoColor.g == 120 && c.tempoColor.b == 120);
 
+        std::remove("/tmp/test_preset_inherit.conf");
+    }
 
     {
         // Negative: duplicate IDs in color_presets
@@ -314,8 +317,6 @@ int main(int argc, char** argv)
         int rc = run_child("bad_color_value", {"--config", "/tmp/test_bad_color.conf"});
         expect("bad_color_value_fails", rc != 0);
         std::remove("/tmp/test_bad_color.conf");
-    }
-        std::remove("/tmp/test_preset_inherit.conf");
     }
 
     if (failures == 0)
