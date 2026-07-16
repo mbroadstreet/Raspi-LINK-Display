@@ -22,15 +22,17 @@ static void expect(const std::string& name, bool condition)
     }
 }
 
-// Helper to build argv from vector (argc = size, no nullptr)
-static std::vector<char*> make_argv(const std::vector<std::string>& args)
+// Safe helper: owns the string storage so c_str() pointers remain valid during parseConfig()
+static Config parse_for_test(const std::vector<std::string>& args)
 {
+    std::vector<std::string> storage = args;
     std::vector<char*> argv;
-    for (auto& s : args)
+    argv.reserve(storage.size());
+    for (auto& s : storage)
     {
         argv.push_back(const_cast<char*>(s.c_str()));
     }
-    return argv;
+    return parseConfig(static_cast<int>(argv.size()), argv.data());
 }
 
 // Run a child test case by re-executing self with special flag
@@ -53,25 +55,19 @@ int main(int argc, char** argv)
     if (argc > 2 && std::string(argv[1]) == "--test-child")
     {
         std::string case_name = argv[2];
-        // Rebuild argv for the child case (skip the --test-child and name)
         std::vector<std::string> child_args;
         child_args.push_back(argv[0]);
         for (int i = 3; i < argc; ++i)
         {
             child_args.push_back(argv[i]);
         }
-        auto vargv = make_argv(child_args);
-        // Call parseConfig - it will exit on error, which is what we want for negative
-        // The parent will see the exit code
-        Config c = parseConfig(vargv.size(), vargv.data());
-        // If we reach here for a negative case, it's a fail, but parent will see exit 0
+        Config c = parse_for_test(child_args);
         return 0;
     }
 
     // === Good paths ===
     {
-        auto v = make_argv({"test"});
-        Config c = parseConfig(v.size(), v.data());
+        Config c = parse_for_test({"test"});
         expect("default_config_width", c.width == 480);
         expect("default_config_fullscreen", c.fullscreen == true);
         expect("default_config_tempo", c.initialTempo == 120.0);
@@ -79,16 +75,14 @@ int main(int argc, char** argv)
     }
 
     {
-        auto v = make_argv({"test", "--config", "config/link-pi-display.example.conf"});
-        Config c = parseConfig(v.size(), v.data());
+        Config c = parse_for_test({"test", "--config", "config/link-pi-display.example.conf"});
         expect("example_config_width", c.width == 480);
         expect("example_config_hide_mouse", c.hideMouseCursor == true);
         expect("example_config_top_band", c.topBandColor.r == 0 && c.topBandColor.g == 0 && c.topBandColor.b == 0);
     }
 
     {
-        auto v = make_argv({"test", "--windowed", "--width", "640", "--tempo", "125"});
-        Config c = parseConfig(v.size(), v.data());
+        Config c = parse_for_test({"test", "--windowed", "--width", "640", "--tempo", "125"});
         expect("cli_windowed", c.fullscreen == false);
         expect("cli_width", c.width == 640);
         expect("cli_tempo", c.initialTempo == 125.0);
@@ -99,7 +93,6 @@ int main(int argc, char** argv)
         std::ofstream tmp("/tmp/test_bad_status_font.conf");
         tmp << "status_font_size=0\n";
         tmp.close();
-        auto v = make_argv({"test", "--config", "/tmp/test_bad_status_font.conf"});
         int rc = run_child("bad_status_font_size_zero", {"--config", "/tmp/test_bad_status_font.conf"});
         expect("bad_status_font_size_zero", rc != 0);
         std::remove("/tmp/test_bad_status_font.conf");
@@ -153,8 +146,7 @@ int main(int argc, char** argv)
         std::ofstream tmp("/tmp/test_alias_bg.conf");
         tmp << "background_color=10,20,30,255\n";
         tmp.close();
-        auto v = make_argv({"test", "--config", "/tmp/test_alias_bg.conf"});
-        Config c = parseConfig(v.size(), v.data());
+        Config c = parse_for_test({"test", "--config", "/tmp/test_alias_bg.conf"});
         expect("alias_background_maps_to_center", c.centerBandColor.r == 10 && c.centerBandColor.g == 20 && c.centerBandColor.b == 30);
         std::remove("/tmp/test_alias_bg.conf");
     }
@@ -164,8 +156,7 @@ int main(int argc, char** argv)
         std::ofstream tmp("/tmp/test_alias_band.conf");
         tmp << "band_color=5,6,7,255\n";
         tmp.close();
-        auto v = make_argv({"test", "--config", "/tmp/test_alias_band.conf"});
-        Config c = parseConfig(v.size(), v.data());
+        Config c = parse_for_test({"test", "--config", "/tmp/test_alias_band.conf"});
         expect("alias_band_maps_to_top", c.topBandColor.r == 5 && c.topBandColor.g == 6 && c.topBandColor.b == 7);
         expect("alias_band_maps_to_bottom", c.bottomBandColor.r == 5 && c.bottomBandColor.g == 6 && c.bottomBandColor.b == 7);
         std::remove("/tmp/test_alias_band.conf");
@@ -174,14 +165,13 @@ int main(int argc, char** argv)
     // explicit top/center/bottom win over aliases
     {
         std::ofstream tmp("/tmp/test_explicit_wins.conf");
-        tmp << "background_color=99,99,99,255\n";  // should be ignored
-        tmp << "center_band_color=11,22,33,255\n"; // explicit wins
-        tmp << "band_color=44,55,66,255\n";         // should be ignored for top/bottom
+        tmp << "background_color=99,99,99,255\n";
+        tmp << "center_band_color=11,22,33,255\n";
+        tmp << "band_color=44,55,66,255\n";
         tmp << "top_band_color=1,2,3,255\n";
         tmp << "bottom_band_color=7,8,9,255\n";
         tmp.close();
-        auto v = make_argv({"test", "--config", "/tmp/test_explicit_wins.conf"});
-        Config c = parseConfig(v.size(), v.data());
+        Config c = parse_for_test({"test", "--config", "/tmp/test_explicit_wins.conf"});
         expect("explicit_center_wins_over_alias", c.centerBandColor.r == 11 && c.centerBandColor.g == 22 && c.centerBandColor.b == 33);
         expect("explicit_top_wins_over_alias", c.topBandColor.r == 1 && c.topBandColor.g == 2 && c.topBandColor.b == 3);
         expect("explicit_bottom_wins_over_alias", c.bottomBandColor.r == 7 && c.bottomBandColor.g == 8 && c.bottomBandColor.b == 9);
