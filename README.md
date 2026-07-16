@@ -106,3 +106,18 @@ cmake --build build --target config_parser_tests -j"$(nproc)"
 ## License
 
 MIT License — see [LICENSE](LICENSE) file.
+
+## Planned Runtime Configuration (v0.6+)
+
+The following capabilities are planned for future releases:
+
+- `R` key — reload the current config source at runtime (visual settings only in first implementation)
+- `P` key — cycle through named color presets defined in the loaded config
+- Screen preset configs — separate launch-time config files for different displays (see `config/presets/` in the future)
+
+For details see:
+- `docs/RUNTIME-CONFIG.md`
+- `docs/SCREEN-PRESETS.md`
+
+These features are not yet implemented.
+

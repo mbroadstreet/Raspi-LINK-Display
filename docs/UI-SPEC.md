@@ -79,3 +79,20 @@ CLI options override config-file values.
 - Toggling to windowed mode with `F` restores the cursor.
 - Cursor state is not written back to the config file.
 - The cursor is restored on application exit.
+
+## Planned Future Extensions (v0.6+)
+
+The following runtime visual adjustments are planned but not yet implemented:
+
+- `R` key: reload current config source (safe visual settings and fonts only; window size and fullscreen mode remain launch-time only).
+- `P` key: cycle named color presets defined inside the current config. Only colors are changed.
+
+See `docs/RUNTIME-CONFIG.md` for the full planned design.
+
+Future help overlay text is expected to include:
+
+```
+R Reload config
+P Color preset
+```
+

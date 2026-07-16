@@ -45,3 +45,17 @@ This repo must stay independently testable and runnable without the container.
 - This module will not become the container application.
 - Direct addition of external control protocols into this module is discouraged.
 - Runtime behavior changes are out of scope for documentation/hygiene releases.
+## v0.6 Planned Work
+
+Runtime visual configuration features (planned, not yet implemented):
+
+- Color preset parsing and `P` key cycling (`v0.6-color-presets-cycle-key`)
+- Runtime config reload via `R` key with safe visual updates (`v0.6-runtime-config-reload`)
+- Screen preset config examples and documentation (`v0.6-screen-preset-configs`)
+
+See:
+- `docs/RUNTIME-CONFIG.md`
+- `docs/SCREEN-PRESETS.md`
+
+These features are intended to be additive and should not affect launch-time behavior or existing `--print-config` / `--module-info` output beyond planned extensions.
+

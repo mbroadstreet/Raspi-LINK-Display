@@ -128,3 +128,30 @@ These should fail with clear error and non-zero exit, without starting SDL or Li
 - --help includes the new options
 - Config defaults unchanged
 - Existing v0.4 tests still valid
+
+## Planned Runtime Visual Config Testing (v0.6+)
+
+The following areas are identified for future testing once the corresponding features are implemented. These tests do not exist yet.
+
+### Color Preset Cycling (P key)
+
+- Define multiple color presets in a config file.
+- Verify `P` cycles through them in the defined order.
+- Verify only colors change (fonts, layout, and window mode are unaffected).
+- Verify `P` is a no-op (or reports) when no color presets are defined.
+
+### Runtime Config Reload (R key)
+
+- Start with a config file.
+- Modify the config file on disk.
+- Press `R` and verify visual updates occur without restarting the application or Ableton Link.
+- Verify that width/height/fullscreen changes are not applied live (warning or deferral).
+- Verify transactional font reload behavior (all fonts must succeed or none are swapped).
+
+### Screen Preset Configs
+
+- Launch with different `--config` files from a future `config/presets/` directory.
+- Verify correct resolution and visual settings are applied at startup.
+
+See `docs/RUNTIME-CONFIG.md` and `docs/SCREEN-PRESETS.md` for the design these tests will validate.
+
