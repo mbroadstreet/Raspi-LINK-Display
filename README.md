@@ -120,3 +120,9 @@ For details see:
 - `docs/SCREEN-PRESETS.md`
 
 These features are not yet implemented.
+
+## v0.6 Color Presets (P key)
+
+Press **P** to cycle through named color presets defined in the config using dot-prefixed syntax (see config/link-pi-display.example.conf for examples).
+
+Only colors change. Layout, fonts, and Link state are unaffected.

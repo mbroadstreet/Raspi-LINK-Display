@@ -58,3 +58,7 @@ See:
 - `docs/SCREEN-PRESETS.md`
 
 These features are intended to be additive and should not affect launch-time behavior or existing `--print-config` / `--module-info` output beyond planned extensions.
+
+## v0.6 Status
+- Color presets + P cycle key implemented (Ticket 2).
+- R reload and screen preset files are future (Tickets 3/4).
