@@ -424,8 +424,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                     {
                         if (!isValidPresetId(t))
                         {
-                            std::cerr << "Error: Invalid color preset ID '" << t << "' in " << path << ":" << lineNumber << "
-";
+                            std::cerr << "Error: Invalid color preset ID '" << t << "' in " << path << ":" << lineNumber << std::endl;
                             std::exit(1);
                         }
                         config.colorPresetNames.push_back(t);
@@ -437,8 +436,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 std::string id = trim(value);
                 if (!isValidPresetId(id))
                 {
-                    std::cerr << "Error: Invalid color preset ID '" << id << "' in " << path << ":" << lineNumber << "
-";
+                    std::cerr << "Error: Invalid color preset ID '" << id << "' in " << path << ":" << lineNumber << std::endl;
                     std::exit(1);
                 }
                 config.initialColorPreset = id;
@@ -449,8 +447,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 size_t dot = rest.find('.');
                 if (dot == std::string::npos)
                 {
-                    std::cerr << "Error: Invalid color preset key format '" << key << "' in " << path << ":" << lineNumber << "
-";
+                    std::cerr << "Error: Invalid color preset key format '" << key << "' in " << path << ":" << lineNumber << std::endl;
                     std::exit(1);
                 }
                 std::string presetId = rest.substr(0, dot);
@@ -458,16 +455,14 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
 
                 if (!isValidPresetId(presetId))
                 {
-                    std::cerr << "Error: Invalid color preset ID '" << presetId << "' in " << path << ":" << lineNumber << "
-";
+                    std::cerr << "Error: Invalid color preset ID '" << presetId << "' in " << path << ":" << lineNumber << std::endl;
                     std::exit(1);
                 }
 
                 std::string field = colorKeyToField(subkey);
                 if (field.empty())
                 {
-                    std::cerr << "Error: Unknown color key '" << subkey << "' in preset '" << presetId << "' in " << path << ":" << lineNumber << "
-";
+                    std::cerr << "Error: Unknown color key '" << subkey << "' in preset '" << presetId << "' in " << path << ":" << lineNumber << std::endl;
                     std::exit(1);
                 }
 
@@ -631,8 +626,7 @@ Config parseConfig(int argc, char** argv)
         auto it = std::find(config.colorPresetNames.begin(), config.colorPresetNames.end(), startPreset);
         if (it == config.colorPresetNames.end())
         {
-            std::cerr << "Error: color_preset '" << startPreset << "' not listed in color_presets
-";
+            std::cerr << "Error: color_preset '" << startPreset << "' not listed in color_presets" << std::endl;
             std::exit(1);
         }
 
@@ -651,70 +645,41 @@ Config parseConfig(int argc, char** argv)
 void printEffectiveConfig(const Config& config)
 {
     std::cout
-        << "width=" << config.width << "
-"
-        << "height=" << config.height << "
-"
-        << "fullscreen=" << (config.fullscreen ? "true" : "false") << "
-"
-        << "no_gui=" << (config.noGui ? "true" : "false") << "
-"
-        << "tempo=" << std::fixed << std::setprecision(2) << config.initialTempo << "
-"
-        << "quantum=" << std::fixed << std::setprecision(2) << config.quantum << "
-"
-        << "font_path=" << config.fontPath << "
-"
-        << "status_font_size=" << config.statusFontSize << "
-"
-        << "tempo_font_size=" << config.tempoFontSize << "
-"
-        << "bottom_font_size=" << config.bottomFontSize << "
-"
-        << "help_font_size=" << config.helpFontSize << "
-"
-        << "status_inactive_color=" << config.statusInactiveColor.r << "," << config.statusInactiveColor.g << "," << config.statusInactiveColor.b << "," << config.statusInactiveColor.a << "
-"
-        << "status_no_peers_color=" << config.statusNoPeersColor.r << "," << config.statusNoPeersColor.g << "," << config.statusNoPeersColor.b << "," << config.statusNoPeersColor.a << "
-"
-        << "status_connected_color=" << config.statusConnectedColor.r << "," << config.statusConnectedColor.g << "," << config.statusConnectedColor.b << "," << config.statusConnectedColor.a << "
-"
-        << "tempo_color=" << config.tempoColor.r << "," << config.tempoColor.g << "," << config.tempoColor.b << "," << config.tempoColor.a << "
-"
-        << "phase_bar_color=" << config.phaseBarColor.r << "," << config.phaseBarColor.g << "," << config.phaseBarColor.b << "," << config.phaseBarColor.a << "
-"
-        << "phase_marker_color=" << config.phaseMarkerColor.r << "," << config.phaseMarkerColor.g << "," << config.phaseMarkerColor.b << "," << config.phaseMarkerColor.a << "
-"
-        << "top_band_color=" << config.topBandColor.r << "," << config.topBandColor.g << "," << config.topBandColor.b << "," << config.topBandColor.a << "
-"
-        << "center_band_color=" << config.centerBandColor.r << "," << config.centerBandColor.g << "," << config.centerBandColor.b << "," << config.centerBandColor.a << "
-"
-        << "bottom_band_color=" << config.bottomBandColor.r << "," << config.bottomBandColor.g << "," << config.bottomBandColor.b << "," << config.bottomBandColor.a << "
-"
-        << "help_overlay_background_color=" << config.helpOverlayBackgroundColor.r << "," << config.helpOverlayBackgroundColor.g << "," << config.helpOverlayBackgroundColor.b << "," << config.helpOverlayBackgroundColor.a << "
-"
-        << "help_overlay_text_color=" << config.helpOverlayTextColor.r << "," << config.helpOverlayTextColor.g << "," << config.helpOverlayTextColor.b << "," << config.helpOverlayTextColor.a << "
-"
-        << "phase_bar_height=" << config.phaseBarHeight << "
-"
-        << "phase_bar_segment_gap=" << config.phaseBarSegmentGap << "
-"
-        << "phase_bar_margin=" << config.phaseBarMargin << "
-"
-        << "help_overlay_seconds=" << config.helpOverlaySeconds << "
-"
-        << "hide_mouse_cursor=" << (config.hideMouseCursor ? "true" : "false") << "
-";
+        << "width=" << config.width << std::endl
+        << "height=" << config.height << std::endl
+        << "fullscreen=" << (config.fullscreen ? "true" : "false") << std::endl
+        << "no_gui=" << (config.noGui ? "true" : "false") << std::endl
+        << "tempo=" << std::fixed << std::setprecision(2) << config.initialTempo << std::endl
+        << "quantum=" << std::fixed << std::setprecision(2) << config.quantum << std::endl
+        << "font_path=" << config.fontPath << std::endl
+        << "status_font_size=" << config.statusFontSize << std::endl
+        << "tempo_font_size=" << config.tempoFontSize << std::endl
+        << "bottom_font_size=" << config.bottomFontSize << std::endl
+        << "help_font_size=" << config.helpFontSize << std::endl
+        << "status_inactive_color=" << config.statusInactiveColor.r << "," << config.statusInactiveColor.g << "," << config.statusInactiveColor.b << "," << config.statusInactiveColor.a << std::endl
+        << "status_no_peers_color=" << config.statusNoPeersColor.r << "," << config.statusNoPeersColor.g << "," << config.statusNoPeersColor.b << "," << config.statusNoPeersColor.a << std::endl
+        << "status_connected_color=" << config.statusConnectedColor.r << "," << config.statusConnectedColor.g << "," << config.statusConnectedColor.b << "," << config.statusConnectedColor.a << std::endl
+        << "tempo_color=" << config.tempoColor.r << "," << config.tempoColor.g << "," << config.tempoColor.b << "," << config.tempoColor.a << std::endl
+        << "phase_bar_color=" << config.phaseBarColor.r << "," << config.phaseBarColor.g << "," << config.phaseBarColor.b << "," << config.phaseBarColor.a << std::endl
+        << "phase_marker_color=" << config.phaseMarkerColor.r << "," << config.phaseMarkerColor.g << "," << config.phaseMarkerColor.b << "," << config.phaseMarkerColor.a << std::endl
+        << "top_band_color=" << config.topBandColor.r << "," << config.topBandColor.g << "," << config.topBandColor.b << "," << config.topBandColor.a << std::endl
+        << "center_band_color=" << config.centerBandColor.r << "," << config.centerBandColor.g << "," << config.centerBandColor.b << "," << config.centerBandColor.a << std::endl
+        << "bottom_band_color=" << config.bottomBandColor.r << "," << config.bottomBandColor.g << "," << config.bottomBandColor.b << "," << config.bottomBandColor.a << std::endl
+        << "help_overlay_background_color=" << config.helpOverlayBackgroundColor.r << "," << config.helpOverlayBackgroundColor.g << "," << config.helpOverlayBackgroundColor.b << "," << config.helpOverlayBackgroundColor.a << std::endl
+        << "help_overlay_text_color=" << config.helpOverlayTextColor.r << "," << config.helpOverlayTextColor.g << "," << config.helpOverlayTextColor.b << "," << config.helpOverlayTextColor.a << std::endl
+        << "phase_bar_height=" << config.phaseBarHeight << std::endl
+        << "phase_bar_segment_gap=" << config.phaseBarSegmentGap << std::endl
+        << "phase_bar_margin=" << config.phaseBarMargin << std::endl
+        << "help_overlay_seconds=" << config.helpOverlaySeconds << std::endl
+        << "hide_mouse_cursor=" << (config.hideMouseCursor ? "true" : "false") << std::endl;
 
     std::cout << "color_presets=";
     for (size_t i = 0; i < config.colorPresetNames.size(); ++i) {
         if (i > 0) std::cout << ",";
         std::cout << config.colorPresetNames[i];
     }
-    std::cout << "
-";
-    std::cout << "active_color_preset=" << getActiveColorPresetName(config) << "
-";
+    std::cout << std::endl;
+    std::cout << "active_color_preset=" << getActiveColorPresetName(config) << std::endl;
 }
 
 void printModuleInfo()

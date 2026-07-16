@@ -193,18 +193,13 @@ int main(int argc, char** argv)
     {
         // Good: basic presets via temp file
         std::ofstream tmp("/tmp/test_presets_good.conf");
-        tmp << "color_presets=default,high_contrast
-";
-        tmp << "color_preset=default
-";
-        tmp << "color_preset.default.name=Default
-";
-        tmp << "color_preset.default.tempo_color=64,79,96,255
-";
-        tmp << "color_preset.high_contrast.name=High Contrast
-";
-        tmp << "color_preset.high_contrast.tempo_color=255,255,255,255
-";
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=default
+color_preset.default.name=Default
+color_preset.default.tempo_color=64,79,96,255
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.tempo_color=255,255,255,255
+)CFG";
         tmp.close();
 
         Config c = parse_for_test({"test", "--config", "/tmp/test_presets_good.conf"});
@@ -219,10 +214,9 @@ int main(int argc, char** argv)
     {
         // Negative: unknown initial preset
         std::ofstream tmp("/tmp/test_bad_initial_preset.conf");
-        tmp << "color_presets=default
-";
-        tmp << "color_preset=nonexistent
-";
+        tmp << R"CFG(color_presets=default
+color_preset=nonexistent
+)CFG";
         tmp.close();
 
         int rc = run_child("bad_initial_preset", {"--config", "/tmp/test_bad_initial_preset.conf"});
@@ -233,10 +227,9 @@ int main(int argc, char** argv)
     {
         // Negative: non-color key inside preset (e.g. width)
         std::ofstream tmp("/tmp/test_bad_preset_key.conf");
-        tmp << "color_presets=bad
-";
-        tmp << "color_preset.bad.width=999
-";
+        tmp << R"CFG(color_presets=bad
+color_preset.bad.width=999
+)CFG";
         tmp.close();
 
         int rc = run_child("bad_preset_noncolor_key", {"--config", "/tmp/test_bad_preset_key.conf"});
@@ -247,16 +240,12 @@ int main(int argc, char** argv)
     {
         // Good: inheritance (only override some colors)
         std::ofstream tmp("/tmp/test_preset_inherit.conf");
-        tmp << "tempo_color=10,20,30,255
-";  // base
-        tmp << "color_presets=dim
-";
-        tmp << "color_preset=dim
-";
-        tmp << "color_preset.dim.name=Dim
-";
-        tmp << "color_preset.dim.tempo_color=120,120,120,255
-";
+        tmp << R"CFG(tempo_color=10,20,30,255
+color_presets=dim
+color_preset=dim
+color_preset.dim.name=Dim
+color_preset.dim.tempo_color=120,120,120,255
+)CFG";
         tmp.close();
 
         Config c = parse_for_test({"test", "--config", "/tmp/test_preset_inherit.conf"});
@@ -268,10 +257,9 @@ int main(int argc, char** argv)
     {
         // Negative: duplicate IDs in color_presets
         std::ofstream tmp("/tmp/test_dup_ids.conf");
-        tmp << "color_presets=default,high_contrast,default
-";
-        tmp << "color_preset=default
-";
+        tmp << R"CFG(color_presets=default,high_contrast,default
+color_preset=default
+)CFG";
         tmp.close();
         int rc = run_child("dup_preset_ids", {"--config", "/tmp/test_dup_ids.conf"});
         expect("dup_preset_ids_fails", rc != 0);
@@ -281,10 +269,9 @@ int main(int argc, char** argv)
     {
         // Negative: invalid preset ID with dot
         std::ofstream tmp("/tmp/test_bad_id_dot.conf");
-        tmp << "color_presets=bad.id
-";
-        tmp << "color_preset=bad.id
-";
+        tmp << R"CFG(color_presets=bad.id
+color_preset=bad.id
+)CFG";
         tmp.close();
         int rc = run_child("bad_id_with_dot", {"--config", "/tmp/test_bad_id_dot.conf"});
         expect("bad_id_with_dot_fails", rc != 0);
@@ -294,12 +281,10 @@ int main(int argc, char** argv)
     {
         // Negative: unknown subkey in preset
         std::ofstream tmp("/tmp/test_bad_subkey.conf");
-        tmp << "color_presets=foo
-";
-        tmp << "color_preset.foo.name=foo
-";
-        tmp << "color_preset.foo.width=123
-";
+        tmp << R"CFG(color_presets=foo
+color_preset.foo.name=foo
+color_preset.foo.width=123
+)CFG";
         tmp.close();
         int rc = run_child("bad_subkey", {"--config", "/tmp/test_bad_subkey.conf"});
         expect("bad_subkey_fails", rc != 0);
@@ -309,10 +294,9 @@ int main(int argc, char** argv)
     {
         // Negative: invalid color value in preset
         std::ofstream tmp("/tmp/test_bad_color.conf");
-        tmp << "color_presets=foo
-";
-        tmp << "color_preset.foo.tempo_color=999,0,0,255
-";
+        tmp << R"CFG(color_presets=foo
+color_preset.foo.tempo_color=999,0,0,255
+)CFG";
         tmp.close();
         int rc = run_child("bad_color_value", {"--config", "/tmp/test_bad_color.conf"});
         expect("bad_color_value_fails", rc != 0);
@@ -321,14 +305,12 @@ int main(int argc, char** argv)
 
     if (failures == 0)
     {
-        std::cout << "All config parser tests passed.
-";
+        std::cout << "All config parser tests passed." << std::endl;
         return 0;
     }
     else
     {
-        std::cout << failures << " tests failed.
-";
+        std::cout << failures << " tests failed." << std::endl;
         return 1;
     }
 }
