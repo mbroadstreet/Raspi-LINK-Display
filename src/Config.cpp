@@ -414,7 +414,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             // v0.6 Color Presets (dot-prefixed only)
             else if (key == "color_presets")
             {
-                config.colorPresetNames.clear();
+                std::vector<std::string> parsedPresets;
                 std::istringstream ss(value);
                 std::string token;
                 while (std::getline(ss, token, ','))
@@ -427,9 +427,15 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                             std::cerr << "Error: Invalid color preset ID '" << t << "' in " << path << ":" << lineNumber << std::endl;
                             std::exit(1);
                         }
-                        config.colorPresetNames.push_back(t);
+                        if (std::find(parsedPresets.begin(), parsedPresets.end(), t) != parsedPresets.end())
+                        {
+                            std::cerr << "Error: Duplicate color preset ID '" << t << "' in " << path << ":" << lineNumber << std::endl;
+                            std::exit(1);
+                        }
+                        parsedPresets.push_back(t);
                     }
                 }
+                config.colorPresetNames = parsedPresets;
             }
             else if (key == "color_preset")
             {
@@ -623,6 +629,18 @@ Config parseConfig(int argc, char** argv)
         {
             std::cerr << "Error: Unknown option: " << arg << "\n";
             printUsage(argv[0]);
+            std::exit(1);
+        }
+    }
+
+    // v0.6: Validate every listed preset has at least one definition (.name or color key)
+    for (const auto& id : config.colorPresetNames)
+    {
+        bool hasDef = (config.colorPresetLabels.find(id) != config.colorPresetLabels.end()) ||
+                      (config.colorPresetOverrides.find(id) != config.colorPresetOverrides.end());
+        if (!hasDef)
+        {
+            std::cerr << "Error: color preset '" << id << "' is listed in color_presets but has no definition (no color_preset." << id << ".* entries) in " << config.configPath << std::endl;
             std::exit(1);
         }
     }

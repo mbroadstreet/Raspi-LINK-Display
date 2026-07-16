@@ -267,6 +267,19 @@ color_preset=default
     }
 
     {
+        // Negative: listed-but-undefined preset (listed in color_presets but no .name and no color override)
+        std::ofstream tmp("/tmp/test_listed_undefined.conf");
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=default
+color_preset.default.name=Default
+)CFG";
+        tmp.close();
+        int rc = run_child("listed_but_undefined", {"--config", "/tmp/test_listed_undefined.conf"});
+        expect("listed_but_undefined_fails", rc != 0);
+        std::remove("/tmp/test_listed_undefined.conf");
+    }
+
+    {
         // Negative: invalid preset ID with dot
         std::ofstream tmp("/tmp/test_bad_id_dot.conf");
         tmp << R"CFG(color_presets=bad.id
