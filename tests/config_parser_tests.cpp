@@ -7,6 +7,7 @@
 #include <cstdio>
 
 static int failures = 0;
+static std::string selfPath;
 
 static void expect(const std::string& name, bool condition)
 {
@@ -35,7 +36,7 @@ static std::vector<char*> make_argv(const std::vector<std::string>& args)
 // Run a child test case by re-executing self with special flag
 static int run_child(const std::string& case_name, const std::vector<std::string>& args)
 {
-    std::string exe = (argc > 0 ? std::string(argv[0]) : std::string("./config_parser_tests"));
+    std::string exe = selfPath.empty() ? std::string("./config_parser_tests") : selfPath;
     std::string cmd = exe + " --test-child " + case_name;
     for (size_t i = 0; i < args.size(); ++i)
     {
@@ -46,6 +47,8 @@ static int run_child(const std::string& case_name, const std::vector<std::string
 
 int main(int argc, char** argv)
 {
+    selfPath = (argc > 0 ? std::string(argv[0]) : std::string("./config_parser_tests"));
+
     // Support child mode for negative tests
     if (argc > 2 && std::string(argv[1]) == "--test-child")
     {
@@ -91,21 +94,63 @@ int main(int argc, char** argv)
         expect("cli_tempo", c.initialTempo == 125.0);
     }
 
-    // === Strict validation failures (via child) ===
+    // === Strict validation via temp config files (for config-file keys) ===
+    {
+        std::ofstream tmp("/tmp/test_bad_status_font.conf");
+        tmp << "status_font_size=0\n";
+        tmp.close();
+        auto v = make_argv({"test", "--config", "/tmp/test_bad_status_font.conf"});
+        int rc = run_child("bad_status_font_size_zero", {"--config", "/tmp/test_bad_status_font.conf"});
+        expect("bad_status_font_size_zero", rc != 0);
+        std::remove("/tmp/test_bad_status_font.conf");
+    }
+
+    {
+        std::ofstream tmp("/tmp/test_bad_phase_gap.conf");
+        tmp << "phase_bar_segment_gap=-7\n";
+        tmp.close();
+        int rc = run_child("bad_phase_gap_negative", {"--config", "/tmp/test_bad_phase_gap.conf"});
+        expect("bad_phase_gap_negative", rc != 0);
+        std::remove("/tmp/test_bad_phase_gap.conf");
+    }
+
+    {
+        std::ofstream tmp("/tmp/test_bad_help_overlay.conf");
+        tmp << "help_overlay_seconds=999\n";
+        tmp.close();
+        int rc = run_child("bad_help_overlay_seconds", {"--config", "/tmp/test_bad_help_overlay.conf"});
+        expect("bad_help_overlay_seconds", rc != 0);
+        std::remove("/tmp/test_bad_help_overlay.conf");
+    }
+
+    {
+        std::ofstream tmp("/tmp/test_bad_color_value.conf");
+        tmp << "status_inactive_color=999,44,48,255\n";
+        tmp.close();
+        int rc = run_child("bad_color_value", {"--config", "/tmp/test_bad_color_value.conf"});
+        expect("bad_color_value", rc != 0);
+        std::remove("/tmp/test_bad_color_value.conf");
+    }
+
+    {
+        std::ofstream tmp("/tmp/test_bad_color_partial.conf");
+        tmp << "status_inactive_color=40abc,44,48,255\n";
+        tmp.close();
+        int rc = run_child("bad_color_partial", {"--config", "/tmp/test_bad_color_partial.conf"});
+        expect("bad_color_partial", rc != 0);
+        std::remove("/tmp/test_bad_color_partial.conf");
+    }
+
+    // CLI-based negatives (real CLI options)
     expect("bad_width_negative", run_child("bad_width_negative", {"--width", "-480"}) != 0);
     expect("bad_height_zero", run_child("bad_height_zero", {"--height", "0"}) != 0);
-    expect("bad_status_font_size_zero", run_child("bad_status_font_size_zero", {"--status_font_size", "0"}) != 0);  // note: may need -- for CLI, but parser will catch in validation
-    expect("bad_phase_gap_negative", run_child("bad_phase_gap_negative", {"--phase_bar_segment_gap", "-7"}) != 0);
-    expect("bad_help_overlay_seconds", run_child("bad_help_overlay_seconds", {"--help_overlay_seconds", "999"}) != 0);
-    expect("bad_color_value", run_child("bad_color_value", {"--status_inactive_color", "999,44,48,255"}) != 0);
     expect("bad_width_partial", run_child("bad_width_partial", {"--width", "480abc"}) != 0);
     expect("bad_tempo_partial", run_child("bad_tempo_partial", {"--tempo", "120abc"}) != 0);
-    expect("bad_color_partial", run_child("bad_color_partial", {"--status_inactive_color", "40abc,44,48,255"}) != 0);
 
     // === Alias behavior ===
-    // For alias, we can test by creating temp config with background_color and check center
+    // background_color maps to center only if center absent
     {
-        std::ofstream tmp(" /tmp/test_alias_bg.conf");
+        std::ofstream tmp("/tmp/test_alias_bg.conf");
         tmp << "background_color=10,20,30,255\n";
         tmp.close();
         auto v = make_argv({"test", "--config", "/tmp/test_alias_bg.conf"});
@@ -114,6 +159,7 @@ int main(int argc, char** argv)
         std::remove("/tmp/test_alias_bg.conf");
     }
 
+    // band_color maps to top/bottom only if explicit top/bottom absent
     {
         std::ofstream tmp("/tmp/test_alias_band.conf");
         tmp << "band_color=5,6,7,255\n";
@@ -125,7 +171,24 @@ int main(int argc, char** argv)
         std::remove("/tmp/test_alias_band.conf");
     }
 
-    // === CLI behavior failures (via child) ===
+    // explicit top/center/bottom win over aliases
+    {
+        std::ofstream tmp("/tmp/test_explicit_wins.conf");
+        tmp << "background_color=99,99,99,255\n";  // should be ignored
+        tmp << "center_band_color=11,22,33,255\n"; // explicit wins
+        tmp << "band_color=44,55,66,255\n";         // should be ignored for top/bottom
+        tmp << "top_band_color=1,2,3,255\n";
+        tmp << "bottom_band_color=7,8,9,255\n";
+        tmp.close();
+        auto v = make_argv({"test", "--config", "/tmp/test_explicit_wins.conf"});
+        Config c = parseConfig(v.size(), v.data());
+        expect("explicit_center_wins_over_alias", c.centerBandColor.r == 11 && c.centerBandColor.g == 22 && c.centerBandColor.b == 33);
+        expect("explicit_top_wins_over_alias", c.topBandColor.r == 1 && c.topBandColor.g == 2 && c.topBandColor.b == 3);
+        expect("explicit_bottom_wins_over_alias", c.bottomBandColor.r == 7 && c.bottomBandColor.g == 8 && c.bottomBandColor.b == 9);
+        std::remove("/tmp/test_explicit_wins.conf");
+    }
+
+    // === CLI behavior failures (real CLI options) ===
     expect("unknown_option", run_child("unknown_option", {"--foo-bar"}) != 0);
     expect("missing_config_value", run_child("missing_config_value", {"--config"}) != 0);
     expect("missing_width_value", run_child("missing_width_value", {"--width"}) != 0);
