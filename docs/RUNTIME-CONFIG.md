@@ -78,30 +78,38 @@ Pressing `P` is intended to cycle through named color presets defined in the cur
 color_presets=default,high_contrast,warm_dim
 color_preset=default
 
-[color_preset.default]
-name=Default
-status_inactive_color=40,44,48,255
-status_no_peers_color=40,44,48,255
-status_connected_color=75,85,95,255
-tempo_color=64,79,96,255
-phase_bar_color=83,114,151,255
-phase_marker_color=255,255,255,255
-top_band_color=0,0,0,255
-center_band_color=18,18,18,255
-bottom_band_color=0,0,0,255
-help_overlay_background_color=0,0,0,220
-help_overlay_text_color=210,210,210,255
+color_preset.default.name=Default
+color_preset.default.status_inactive_color=40,44,48,255
+color_preset.default.status_no_peers_color=40,44,48,255
+color_preset.default.status_connected_color=75,85,95,255
+color_preset.default.tempo_color=64,79,96,255
+color_preset.default.phase_bar_color=83,114,151,255
+color_preset.default.phase_marker_color=255,255,255,255
+color_preset.default.top_band_color=0,0,0,255
+color_preset.default.center_band_color=18,18,18,255
+color_preset.default.bottom_band_color=0,0,0,255
+color_preset.default.help_overlay_background_color=0,0,0,220
+color_preset.default.help_overlay_text_color=210,210,210,255
 
-[color_preset.high_contrast]
-name=High Contrast
-status_inactive_color=220,220,220,255
-...
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.status_inactive_color=220,220,220,255
+color_preset.high_contrast.status_no_peers_color=220,220,220,255
+color_preset.high_contrast.status_connected_color=255,255,255,255
+color_preset.high_contrast.tempo_color=255,255,255,255
+color_preset.high_contrast.phase_bar_color=255,255,255,255
+color_preset.high_contrast.phase_marker_color=0,0,0,255
+color_preset.high_contrast.top_band_color=0,0,0,255
+color_preset.high_contrast.center_band_color=0,0,0,255
+color_preset.high_contrast.bottom_band_color=0,0,0,255
+color_preset.high_contrast.help_overlay_background_color=0,0,0,230
+color_preset.high_contrast.help_overlay_text_color=255,255,255,255
 ```
 
 ### Rules
 
 - `color_presets` defines the cycle order.
-- `color_preset` (or `color_preset.<name>`) defines the initial / current preset.
+- `color_preset` defines the initial active preset by name.
+- `color_preset.<name>.<key>` entries define named preset values.
 - Top-level color keys continue to act as base/default values.
 - A color preset may override any subset of color keys. Missing keys inherit from the base effective configuration.
 - `--print-config` should report the active color preset and the list of available presets.

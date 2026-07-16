@@ -95,4 +95,3 @@ Future help overlay text is expected to include:
 R Reload config
 P Color preset
 ```
-
