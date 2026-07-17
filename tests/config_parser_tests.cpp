@@ -441,16 +441,12 @@ color_preset.custom.tempo_color=100,100,100,255
     {
         // explicit config reload uses same path
         std::ofstream tmp("/tmp/test_explicit_reload.conf");
-        tmp << "color_presets=default,high_contrast
-";
-        tmp << "color_preset=default
-";
-        tmp << "color_preset.default.name=Default
-";
-        tmp << "color_preset.high_contrast.name=High Contrast
-";
-        tmp << "color_preset.high_contrast.tempo_color=255,255,255,255
-";
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=default
+color_preset.default.name=Default
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.tempo_color=255,255,255,255
+)CFG";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_explicit_reload.conf"});
         expect("explicit_path_set", c.startupConfigPath == "/tmp/test_explicit_reload.conf");
@@ -470,33 +466,86 @@ color_preset.custom.tempo_color=100,100,100,255
     }
 
     {
-        // invalid reload keeps current
-        Config c = parse_for_test({"test"});
-        std::string orig = c.startupConfigPath;
-        c.startupConfigPath = "/tmp/nonexistent_for_reload_test.conf";
+        // reload preserves --width
+        Config c = parse_for_test({"test", "--width", "640"});
+        expect("cli_width", c.width == 640);
+        c.width = 480;
         bool ok = tryReloadConfig(c);
-        expect("invalid_reload_keeps_current", !ok && c.startupConfigPath == orig);  // but in impl may differ
-        c.startupConfigPath = orig;
+        expect("reload_preserves_width", ok && c.width == 640);
     }
 
     {
-        // missing reload file keeps current
-        Config c = parse_for_test({"test"});
-        bool ok = tryReloadConfig(c);  // if no path
-        // for no path case
+        // reload preserves --height
+        Config c = parse_for_test({"test", "--height", "400"});
+        expect("cli_height", c.height == 400);
+        c.height = 320;
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_height", ok && c.height == 400);
     }
+
+    {
+        // reload preserves --font
+        Config c = parse_for_test({"test", "--font", "/fake/font.ttf"});
+        expect("cli_font", c.fontPath == "/fake/font.ttf");
+        c.fontPath = "default";
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_font", ok && c.fontPath == "/fake/font.ttf");
+    }
+
+    {
+        // reload preserves --windowed
+        Config c = parse_for_test({"test", "--windowed"});
+        expect("cli_windowed", c.fullscreen == false);
+        c.fullscreen = true;
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_windowed", ok && c.fullscreen == false);
+    }
+
+    {
+        // reload preserves --no-gui
+        Config c = parse_for_test({"test", "--no-gui"});
+        expect("cli_no_gui", c.noGui == true);
+        c.noGui = false;
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_no_gui", ok && c.noGui == true);
+    }
+
+    {
+        // reload preserves --quantum
+        Config c = parse_for_test({"test", "--quantum", "8"});
+        expect("cli_quantum", c.quantum == 8.0);
+        c.quantum = 4.0;
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_quantum", ok && c.quantum == 8.0);
+    }
+
+    {
+        // invalid reload keeps current (real explicit-config failure test)
+        std::ofstream tmp("/tmp/test_valid_for_corrupt.conf");
+        tmp << R"CFG(width=480
+height=320
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_valid_for_corrupt.conf"});
+        int orig_width = c.width;
+        std::string orig_path = c.startupConfigPath;
+        std::remove("/tmp/test_valid_for_corrupt.conf");
+        bool ok = tryReloadConfig(c);
+        expect("invalid_reload_keeps_current", !ok && c.width == orig_width && c.startupConfigPath == orig_path);
+        std::remove("/tmp/test_valid_for_corrupt.conf");  // ensure gone
+    }
+
+
 
     {
         // config-defined presets still override after reload
         std::ofstream tmp("/tmp/test_reload_preset.conf");
-        tmp << "color_presets=default,high_contrast
-";
-        tmp << "color_preset=high_contrast
-";
-        tmp << "color_preset.high_contrast.name=HC
-";
-        tmp << "color_preset.high_contrast.tempo_color=1,2,3,255
-";
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=high_contrast
+color_preset.default.name=Default
+color_preset.high_contrast.name=HC
+color_preset.high_contrast.tempo_color=1,2,3,255
+)CFG";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_reload_preset.conf"});
         expect("preset_override_before", c.tempoColor.r == 1);
@@ -508,8 +557,8 @@ color_preset.custom.tempo_color=100,100,100,255
     {
         // empty color_presets= still disables after reload
         std::ofstream tmp("/tmp/test_reload_empty.conf");
-        tmp << "color_presets=
-";
+        tmp << R"CFG(color_presets=
+)CFG";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_reload_empty.conf"});
         expect("empty_before", c.colorPresetNames.empty());

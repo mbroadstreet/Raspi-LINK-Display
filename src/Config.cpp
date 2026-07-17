@@ -842,6 +842,15 @@ bool tryReloadConfig(Config& config) {
             std::string arg = config.originalCliArgs[i];
             if (arg == "--windowed") fresh.fullscreen = false;
             else if (arg == "--no-gui") fresh.noGui = true;
+            else if (arg == "--width" && i+1 < config.originalCliArgs.size()) {
+                try { fresh.width = std::stoi(config.originalCliArgs[++i]); } catch (...) {}
+            }
+            else if (arg == "--height" && i+1 < config.originalCliArgs.size()) {
+                try { fresh.height = std::stoi(config.originalCliArgs[++i]); } catch (...) {}
+            }
+            else if (arg == "--font" && i+1 < config.originalCliArgs.size()) {
+                fresh.fontPath = config.originalCliArgs[++i];
+            }
             else if (arg == "--tempo" && i+1 < config.originalCliArgs.size()) {
                 try { fresh.initialTempo = std::stod(config.originalCliArgs[++i]); } catch (...) {}
             }
