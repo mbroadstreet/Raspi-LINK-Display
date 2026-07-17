@@ -54,6 +54,19 @@ struct Config
     RgbaColor helpOverlayTextColor {210, 210, 210, 255};
     int helpOverlaySeconds = 8;
 
+    // Base colors snapshot for v0.6 preset restoration (captured after final non-preset resolution)
+    RgbaColor baseStatusInactiveColor;
+    RgbaColor baseStatusNoPeersColor;
+    RgbaColor baseStatusConnectedColor;
+    RgbaColor baseTempoColor;
+    RgbaColor basePhaseBarColor;
+    RgbaColor basePhaseMarkerColor;
+    RgbaColor baseTopBandColor;
+    RgbaColor baseCenterBandColor;
+    RgbaColor baseBottomBandColor;
+    RgbaColor baseHelpOverlayBackgroundColor;
+    RgbaColor baseHelpOverlayTextColor;
+
     // Fullscreen behavior
     bool hideMouseCursor = true;
 
@@ -99,3 +112,6 @@ void printModuleInfo();
 void applyColorPreset(Config& config, const std::string& presetName);
 void cycleColorPreset(Config& config);
 std::string getActiveColorPresetName(const Config& config);
+
+void captureBaseColors(Config& config);
+void restoreBaseColors(Config& config);

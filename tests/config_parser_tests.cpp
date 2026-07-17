@@ -340,6 +340,46 @@ color_preset.foo.tempo_color=999,0,0,255
         expect("builtin_high_overrides_phase_marker", c.phaseMarkerColor.r == 0);
     }
 
+    // Test cycle high_contrast -> default restores base colors (built-in, no config)
+    {
+        Config c = parse_for_test({"test"});
+        int base_tempo_r = c.tempoColor.r;
+        int base_phase_r = c.phaseMarkerColor.r;
+        cycleColorPreset(c);  // default -> high_contrast
+        expect("cycle_high_overrides_tempo", c.tempoColor.r == 255 && c.tempoColor.g == 255 && c.tempoColor.b == 255);
+        cycleColorPreset(c);  // high_contrast -> default
+        expect("cycle_default_restores_base_tempo", c.tempoColor.r == base_tempo_r && c.tempoColor.r == 64);
+        expect("cycle_default_restores_base_phase_marker", c.phaseMarkerColor.r == base_phase_r && c.phaseMarkerColor.r == 255);
+    }
+
+    // Test with example config: high -> default restores example base
+    {
+        Config c = parse_for_test({"test", "--config", "config/link-pi-display.example.conf"});
+        int base_tempo_r = c.tempoColor.r;
+        cycleColorPreset(c);  // to high_contrast
+        cycleColorPreset(c);  // back to default
+        expect("example_cycle_default_restores_tempo", c.tempoColor.r == base_tempo_r);
+    }
+
+    // Test partial preset inherits from base (after cycling)
+    {
+        std::ofstream tmp("/tmp/test_partial.conf");
+        tmp << R"CFG(color_presets=default,high_contrast,partial
+color_preset=partial
+color_preset.partial.name=Partial
+color_preset.partial.tempo_color=50,50,50,255
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_partial.conf"});
+        cycleColorPreset(c);  // high_contrast
+        cycleColorPreset(c);  // default (base)
+        cycleColorPreset(c);  // partial -> should use base for non-overridden + override for tempo
+        expect("partial_after_cycle_tempo_override", c.tempoColor.r == 50);
+        // other colors should be base, not previous high_contrast
+        expect("partial_inherits_base_phase", c.phaseMarkerColor.r == 255);  // base
+        std::remove("/tmp/test_partial.conf");
+    }
+
     // config file with color_presets=custom replaces built-ins
     {
         std::ofstream tmp("/tmp/test_custom_presets.conf");
