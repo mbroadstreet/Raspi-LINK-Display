@@ -801,11 +801,6 @@ void printModuleInfo()
 
 
 bool tryReloadConfig(Config& config) {
-    if (config.startupConfigPath.empty() && config.originalCliArgs.empty()) {
-        std::cerr << "Warning: no startup info for reload
-";
-        return false;
-    }
     Config previous = config;
     try {
         Config fresh;
@@ -872,8 +867,7 @@ bool tryReloadConfig(Config& config) {
             bool hasDef = (fresh.colorPresetLabels.find(id) != fresh.colorPresetLabels.end()) ||
                           (fresh.colorPresetOverrides.find(id) != fresh.colorPresetOverrides.end());
             if (!hasDef) {
-                std::cerr << "Reload: preset " << id << " has no definition
-";
+                std::cerr << "Reload: preset " << id << " has no definition" << std::endl;
                 config = previous;
                 return false;
             }
