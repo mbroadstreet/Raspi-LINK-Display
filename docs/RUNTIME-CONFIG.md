@@ -54,6 +54,8 @@ R does **not**:
 
 If the candidate differs in width/height/fullscreen from the live window, the live values are kept and a restart-required/deferred warning is printed. Other valid visual settings from the same candidate may still commit. After deferral, layout constraints such as `phase_bar_margin` are validated against the **live** width; a larger unapplied candidate width cannot make an unusable margin appear valid.
 
+Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only after a successful `SDL_SetWindowFullscreen` call. A later **R** therefore preserves the actual on-screen fullscreen/windowed selection (it must not recreate or re-toggle the SDL window). Original CLI args such as `--windowed` remain stored and may appear in a deferred-difference warning if they disagree with the current live state after F.
+
 ### Font reload (transactional)
 
 1. Parse and validate the candidate configuration (Config-level).

@@ -209,20 +209,35 @@ bool SdlRenderer::pollQuit()
 
             if (key == SDLK_f)
             {
-                Uint32 flags = SDL_GetWindowFlags(window_);
-                bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+                // Toggle live SDL fullscreen only; update config_.fullscreen after success
+                // so the next R preserves the actual manual live selection without recreating
+                // or toggling the window itself.
+                const Uint32 flags = SDL_GetWindowFlags(window_);
+                const bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
 
                 if (isFullscreen)
                 {
-                    SDL_SetWindowFullscreen(window_, 0);
-                    if (config_.hideMouseCursor)
-                        SDL_ShowCursor(SDL_ENABLE);
+                    if (SDL_SetWindowFullscreen(window_, 0) == 0)
+                    {
+                        config_.fullscreen = false;
+                        applyCursorVisibilityFromConfig();
+                    }
+                    else
+                    {
+                        std::cerr << "Fullscreen toggle failed: " << SDL_GetError() << std::endl;
+                    }
                 }
                 else
                 {
-                    SDL_SetWindowFullscreen(window_, SDL_WINDOW_FULLSCREEN_DESKTOP);
-                    if (config_.hideMouseCursor)
-                        SDL_ShowCursor(SDL_DISABLE);
+                    if (SDL_SetWindowFullscreen(window_, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0)
+                    {
+                        config_.fullscreen = true;
+                        applyCursorVisibilityFromConfig();
+                    }
+                    else
+                    {
+                        std::cerr << "Fullscreen toggle failed: " << SDL_GetError() << std::endl;
+                    }
                 }
             }
 

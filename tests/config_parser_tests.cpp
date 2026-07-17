@@ -465,19 +465,46 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        Config c = parse_for_test({"test", "--width", "640"});
+        // CLI --width wins over config file; reload with conflicting file width keeps live 640
+        // (CLI precedence + live window deferral), without fabricating unreachable live state.
+        {
+            std::ofstream tmp("/tmp/test_reload_width.conf");
+            tmp << "width=480\n";
+            tmp << "height=320\n";
+            tmp.close();
+        }
+        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_width.conf", "--width", "640"});
         expect("cli_width", c.width == 640);
-        c.width = 480;
+        {
+            std::ofstream next("/tmp/test_reload_width.conf");
+            next << "width=800\n";
+            next << "height=320\n";
+            next.close();
+        }
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_width", ok && c.width == 640);
+        std::remove("/tmp/test_reload_width.conf");
     }
 
     {
-        Config c = parse_for_test({"test", "--height", "400"});
+        // CLI --height wins; reload with conflicting file height keeps live 400.
+        {
+            std::ofstream tmp("/tmp/test_reload_height.conf");
+            tmp << "width=480\n";
+            tmp << "height=320\n";
+            tmp.close();
+        }
+        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_height.conf", "--height", "400"});
         expect("cli_height", c.height == 400);
-        c.height = 320;
+        {
+            std::ofstream next("/tmp/test_reload_height.conf");
+            next << "width=480\n";
+            next << "height=600\n";
+            next.close();
+        }
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_height", ok && c.height == 400);
+        std::remove("/tmp/test_reload_height.conf");
     }
 
     {
@@ -489,11 +516,26 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        Config c = parse_for_test({"test", "--windowed"});
+        // CLI --windowed wins over file fullscreen=true; reload keeps live windowed/false.
+        {
+            std::ofstream tmp("/tmp/test_reload_windowed.conf");
+            tmp << "fullscreen=true\n";
+            tmp << "width=480\n";
+            tmp << "height=320\n";
+            tmp.close();
+        }
+        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_windowed.conf", "--windowed"});
         expect("cli_windowed_reload", c.fullscreen == false);
-        c.fullscreen = true;
+        {
+            std::ofstream next("/tmp/test_reload_windowed.conf");
+            next << "fullscreen=true\n";
+            next << "width=480\n";
+            next << "height=320\n";
+            next.close();
+        }
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_windowed", ok && c.fullscreen == false);
+        std::remove("/tmp/test_reload_windowed.conf");
     }
 
     {

@@ -46,11 +46,13 @@ struct ParseFailurePolicyGuard {
 
 [[noreturn]] static void failConfig(const std::string& msg)
 {
+    // Startup (ExitProcess): print once then exit.
+    // Reload (ThrowError): do not print here — tryReloadConfig reports once after catch.
+    if (g_parseFailurePolicy == ParseFailurePolicy::ThrowError)
+        throw ConfigParseError(msg);
     std::cerr << msg;
     if (msg.empty() || msg.back() != '\n')
         std::cerr << '\n';
-    if (g_parseFailurePolicy == ParseFailurePolicy::ThrowError)
-        throw ConfigParseError(msg);
     std::exit(1);
 }
 
@@ -903,7 +905,7 @@ bool tryReloadConfig(Config& config) {
             bool hasDef = (fresh.colorPresetLabels.find(id) != fresh.colorPresetLabels.end()) ||
                           (fresh.colorPresetOverrides.find(id) != fresh.colorPresetOverrides.end());
             if (!hasDef) {
-                failConfig("Reload: color preset '" + id + "' is listed in color_presets but has no definition");
+                failConfig("color preset '" + id + "' is listed in color_presets but has no definition");
             }
         }
 
@@ -931,7 +933,7 @@ bool tryReloadConfig(Config& config) {
 
         // Layout constraints must use the live/output width after deferral.
         if (fresh.width > 0 && (fresh.phaseBarMargin * 2 >= fresh.width)) {
-            failConfig("Reload: phase_bar_margin too large for live width (leaves no usable bar)");
+            failConfig("phase_bar_margin too large for live width (leaves no usable bar)");
         }
 
         captureBaseColors(fresh);
@@ -942,7 +944,7 @@ bool tryReloadConfig(Config& config) {
                 : fresh.initialColorPreset;
             auto it = std::find(fresh.colorPresetNames.begin(), fresh.colorPresetNames.end(), startPreset);
             if (it == fresh.colorPresetNames.end()) {
-                failConfig("Reload: color_preset '" + startPreset + "' not listed in color_presets");
+                failConfig("color_preset '" + startPreset + "' not listed in color_presets");
             }
             fresh.activeColorPresetIndex = static_cast<int>(std::distance(fresh.colorPresetNames.begin(), it));
             applyColorPreset(fresh, startPreset);
@@ -960,12 +962,13 @@ bool tryReloadConfig(Config& config) {
         config = fresh;
         return true;
     } catch (const ConfigParseError& e) {
-        std::cerr << "Reload: " << e.what()
+        // Single nonfatal diagnostic for recoverable validation failures.
+        std::cerr << "Reload failed: " << e.what()
                   << " (kept previous working configuration)" << std::endl;
         config = previous;
         return false;
     } catch (const std::exception& e) {
-        std::cerr << "Reload error: " << e.what()
+        std::cerr << "Reload failed: " << e.what()
                   << " (kept previous working configuration)" << std::endl;
         config = previous;
         return false;

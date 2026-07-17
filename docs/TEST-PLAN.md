@@ -160,6 +160,7 @@ Manual Pi GUI (required before acceptance; not claimed by Hermes Windows builds)
 - Font path/size success and nonexistent font failure with full rollback.
 - Width/height/fullscreen file changes warn/defer without window recreate; other safe visuals apply.
 - CLI overrides remain authoritative across repeated R; tempo/quantum do not restart Link.
+- **F then R:** start `--windowed`, press F to fullscreen, press R — window stays fullscreen (no recreate); deferred difference vs startup/`--windowed` may be reported only; F again still returns to windowed. Opposite direction from initial fullscreen when practical.
 
 ### Screen Preset Configs — Ticket 4 (not started)
 
