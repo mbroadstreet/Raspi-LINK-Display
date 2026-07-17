@@ -186,15 +186,254 @@ int main(int argc, char** argv)
     expect("bad_width_partial_cli", run_child("bad_width_partial_cli", {"--width", "480abc"}) != 0);
     expect("bad_tempo_negative_cli", run_child("bad_tempo_negative_cli", {"--tempo", "-1"}) != 0);
     expect("bad_tempo_partial_cli", run_child("bad_tempo_partial_cli", {"--tempo", "120abc"}) != 0);
+    expect("bad_tempo_partial_cli", run_child("bad_tempo_partial_cli", {"--tempo", "120abc"}) != 0);
+
+
+    // === v0.6 Color Preset tests ===
+    {
+        // Good: basic presets via temp file
+        std::ofstream tmp("/tmp/test_presets_good.conf");
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=default
+color_preset.default.name=Default
+color_preset.default.tempo_color=64,79,96,255
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.tempo_color=255,255,255,255
+)CFG";
+        tmp.close();
+
+        Config c = parse_for_test({"test", "--config", "/tmp/test_presets_good.conf"});
+        expect("presets_list_size", c.colorPresetNames.size() == 2);
+        expect("presets_initial", c.initialColorPreset == "default");
+        expect("presets_active_name", getActiveColorPresetName(c) == "default");
+        expect("presets_tempo_default", c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
+
+        std::remove("/tmp/test_presets_good.conf");
+    }
+
+    {
+        // Negative: unknown initial preset
+        std::ofstream tmp("/tmp/test_bad_initial_preset.conf");
+        tmp << R"CFG(color_presets=default
+color_preset=nonexistent
+)CFG";
+        tmp.close();
+
+        int rc = run_child("bad_initial_preset", {"--config", "/tmp/test_bad_initial_preset.conf"});
+        expect("bad_initial_preset_fails", rc != 0);
+        std::remove("/tmp/test_bad_initial_preset.conf");
+    }
+
+    {
+        // Negative: non-color key inside preset (e.g. width)
+        std::ofstream tmp("/tmp/test_bad_preset_key.conf");
+        tmp << R"CFG(color_presets=bad
+color_preset.bad.width=999
+)CFG";
+        tmp.close();
+
+        int rc = run_child("bad_preset_noncolor_key", {"--config", "/tmp/test_bad_preset_key.conf"});
+        expect("bad_preset_noncolor_key_fails", rc != 0);
+        std::remove("/tmp/test_bad_preset_key.conf");
+    }
+
+    {
+        // Good: inheritance (only override some colors)
+        std::ofstream tmp("/tmp/test_preset_inherit.conf");
+        tmp << R"CFG(tempo_color=10,20,30,255
+color_presets=dim
+color_preset=dim
+color_preset.dim.name=Dim
+color_preset.dim.tempo_color=120,120,120,255
+)CFG";
+        tmp.close();
+
+        Config c = parse_for_test({"test", "--config", "/tmp/test_preset_inherit.conf"});
+        expect("preset_inherit_tempo", c.tempoColor.r == 120 && c.tempoColor.g == 120 && c.tempoColor.b == 120);
+
+        std::remove("/tmp/test_preset_inherit.conf");
+    }
+
+    {
+        // Negative: duplicate IDs in color_presets
+        std::ofstream tmp("/tmp/test_dup_ids.conf");
+        tmp << R"CFG(color_presets=default,high_contrast,default
+color_preset=default
+)CFG";
+        tmp.close();
+        int rc = run_child("dup_preset_ids", {"--config", "/tmp/test_dup_ids.conf"});
+        expect("dup_preset_ids_fails", rc != 0);
+        std::remove("/tmp/test_dup_ids.conf");
+    }
+
+    {
+        // Negative: listed-but-undefined preset (listed in color_presets but no .name and no color override)
+        std::ofstream tmp("/tmp/test_listed_undefined.conf");
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=default
+color_preset.default.name=Default
+)CFG";
+        tmp.close();
+        int rc = run_child("listed_but_undefined", {"--config", "/tmp/test_listed_undefined.conf"});
+        expect("listed_but_undefined_fails", rc != 0);
+        std::remove("/tmp/test_listed_undefined.conf");
+    }
+
+    {
+        // Negative: invalid preset ID with dot
+        std::ofstream tmp("/tmp/test_bad_id_dot.conf");
+        tmp << R"CFG(color_presets=bad.id
+color_preset=bad.id
+)CFG";
+        tmp.close();
+        int rc = run_child("bad_id_with_dot", {"--config", "/tmp/test_bad_id_dot.conf"});
+        expect("bad_id_with_dot_fails", rc != 0);
+        std::remove("/tmp/test_bad_id_dot.conf");
+    }
+
+    {
+        // Negative: unknown subkey in preset
+        std::ofstream tmp("/tmp/test_bad_subkey.conf");
+        tmp << R"CFG(color_presets=foo
+color_preset.foo.name=foo
+color_preset.foo.width=123
+)CFG";
+        tmp.close();
+        int rc = run_child("bad_subkey", {"--config", "/tmp/test_bad_subkey.conf"});
+        expect("bad_subkey_fails", rc != 0);
+        std::remove("/tmp/test_bad_subkey.conf");
+    }
+
+    {
+        // Negative: invalid color value in preset
+        std::ofstream tmp("/tmp/test_bad_color.conf");
+        tmp << R"CFG(color_presets=foo
+color_preset.foo.tempo_color=999,0,0,255
+)CFG";
+        tmp.close();
+        int rc = run_child("bad_color_value", {"--config", "/tmp/test_bad_color.conf"});
+        expect("bad_color_value_fails", rc != 0);
+        std::remove("/tmp/test_bad_color.conf");
+    }
+
+
+    // === v0.6 Built-in color presets tests (no config file) ===
+    {
+        Config c = parse_for_test({"test"});
+        expect("builtin_presets_count", c.colorPresetNames.size() == 2);
+        expect("builtin_presets_default", c.colorPresetNames[0] == "default");
+        expect("builtin_presets_high_contrast", c.colorPresetNames[1] == "high_contrast");
+        expect("builtin_default_active", getActiveColorPresetName(c) == "default");
+        expect("builtin_default_label", c.colorPresetLabels["default"] == "Default");
+        expect("builtin_high_label", c.colorPresetLabels["high_contrast"] == "High Contrast");
+        // default is label-only: preserves base colors
+        expect("builtin_default_preserves_base_tempo", c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
+        // high_contrast has overrides
+        expect("builtin_high_has_overrides", c.colorPresetOverrides.count("high_contrast") > 0 && c.colorPresetOverrides["high_contrast"].size() > 0);
+    }
+
+    // Test apply high contrast
+    {
+        Config c = parse_for_test({"test"});
+        applyColorPreset(c, "high_contrast");
+        expect("builtin_high_overrides_tempo", c.tempoColor.r == 255 && c.tempoColor.g == 255 && c.tempoColor.b == 255);
+        expect("builtin_high_overrides_phase_marker", c.phaseMarkerColor.r == 0);
+    }
+
+    // Test cycle high_contrast -> default restores base colors (built-in, no config)
+    {
+        Config c = parse_for_test({"test"});
+        int base_tempo_r = c.tempoColor.r;
+        int base_phase_r = c.phaseMarkerColor.r;
+        cycleColorPreset(c);  // default -> high_contrast
+        expect("cycle_high_overrides_tempo", c.tempoColor.r == 255 && c.tempoColor.g == 255 && c.tempoColor.b == 255);
+        cycleColorPreset(c);  // high_contrast -> default
+        expect("cycle_default_restores_base_tempo", c.tempoColor.r == base_tempo_r && c.tempoColor.r == 64);
+        expect("cycle_default_restores_base_phase_marker", c.phaseMarkerColor.r == base_phase_r && c.phaseMarkerColor.r == 255);
+    }
+
+    // Test with example config: high -> default restores example base
+    {
+        Config c = parse_for_test({"test", "--config", "config/link-pi-display.example.conf"});
+        int base_tempo_r = c.tempoColor.r;
+        cycleColorPreset(c);  // to high_contrast
+        cycleColorPreset(c);  // back to default
+        expect("example_cycle_default_restores_tempo", c.tempoColor.r == base_tempo_r);
+    }
+
+    // Test partial preset inherits from base after a previous preset was active
+    {
+        std::ofstream tmp("/tmp/test_partial.conf");
+        tmp << R"CFG(color_presets=default,high_contrast,partial
+color_preset=default
+color_preset.default.name=Default
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.tempo_color=255,255,255,255
+color_preset.high_contrast.phase_marker_color=0,0,0,255
+color_preset.partial.name=Partial
+color_preset.partial.tempo_color=50,50,50,255
+)CFG";
+        tmp.close();
+
+        Config c = parse_for_test({"test", "--config", "/tmp/test_partial.conf"});
+
+        cycleColorPreset(c);  // default -> high_contrast
+        expect("partial_test_high_phase_marker", c.phaseMarkerColor.r == 0);
+
+        cycleColorPreset(c);  // high_contrast -> partial
+        expect("partial_after_cycle_tempo_override", c.tempoColor.r == 50);
+
+        // other colors should be base, not previous high_contrast
+        expect("partial_inherits_base_phase", c.phaseMarkerColor.r == 255);
+
+        std::remove("/tmp/test_partial.conf");
+    }
+
+    // config file with color_presets=custom replaces built-ins
+    {
+        std::ofstream tmp("/tmp/test_custom_presets.conf");
+        tmp << R"CFG(color_presets=custom
+color_preset=custom
+color_preset.custom.name=Custom
+color_preset.custom.tempo_color=100,100,100,255
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_custom_presets.conf"});
+        expect("file_replaces_presets_count", c.colorPresetNames.size() == 1);
+        expect("file_replaces_name", c.colorPresetNames[0] == "custom");
+        expect("file_replaces_label", c.colorPresetLabels["custom"] == "Custom");
+        expect("file_replaces_override", c.colorPresetOverrides.count("custom") > 0);
+        std::remove("/tmp/test_custom_presets.conf");
+    }
+
+    // config file with no color_presets= keeps built-ins
+    {
+        std::ofstream tmp("/tmp/test_no_presets_key.conf");
+        tmp << "width=640\n";  // some other key, no color_presets
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_no_presets_key.conf"});
+        expect("file_omits_presets_keeps_builtin", c.colorPresetNames.size() == 2 && c.colorPresetNames[0] == "default");
+        std::remove("/tmp/test_no_presets_key.conf");
+    }
+
+    // config file with color_presets= (empty) disables
+    {
+        std::ofstream tmp("/tmp/test_empty_presets.conf");
+        tmp << "color_presets=\n";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_empty_presets.conf"});
+        expect("file_empty_presets_disables", c.colorPresetNames.empty());
+        std::remove("/tmp/test_empty_presets.conf");
+    }
 
     if (failures == 0)
     {
-        std::cout << "All config parser tests passed.\n";
+        std::cout << "All config parser tests passed." << std::endl;
         return 0;
     }
     else
     {
-        std::cout << failures << " tests failed.\n";
+        std::cout << failures << " tests failed." << std::endl;
         return 1;
     }
 }

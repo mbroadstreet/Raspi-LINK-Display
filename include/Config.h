@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <map>
 
 struct RgbaColor
 {
@@ -52,6 +54,19 @@ struct Config
     RgbaColor helpOverlayTextColor {210, 210, 210, 255};
     int helpOverlaySeconds = 8;
 
+    // Base colors snapshot for v0.6 preset restoration (captured after final non-preset resolution)
+    RgbaColor baseStatusInactiveColor;
+    RgbaColor baseStatusNoPeersColor;
+    RgbaColor baseStatusConnectedColor;
+    RgbaColor baseTempoColor;
+    RgbaColor basePhaseBarColor;
+    RgbaColor basePhaseMarkerColor;
+    RgbaColor baseTopBandColor;
+    RgbaColor baseCenterBandColor;
+    RgbaColor baseBottomBandColor;
+    RgbaColor baseHelpOverlayBackgroundColor;
+    RgbaColor baseHelpOverlayTextColor;
+
     // Fullscreen behavior
     bool hideMouseCursor = true;
 
@@ -73,6 +88,15 @@ struct Config
     // v0.5 inspection modes (early exit)
     bool printConfig = false;
     bool moduleInfo = false;
+
+    // v0.6 Color Presets (dot-prefixed syntax only)
+    std::vector<std::string> colorPresetNames;                    // from color_presets= list (order matters)
+    std::string initialColorPreset;                               // from color_preset=
+    std::map<std::string, std::map<std::string, RgbaColor>> colorPresetOverrides;
+    std::map<std::string, std::string> colorPresetLabels;  // .name metadata only, per ticket
+
+    // Runtime active preset state (mutable for P key cycling)
+    int activeColorPresetIndex = -1;  // -1 means no presets / use base
 };
 
 Config parseConfig(int argc, char** argv);
@@ -83,3 +107,11 @@ RgbaColor parseRgbaColor(const std::string& value, const RgbaColor& fallback);
 // v0.5 inspection helpers
 void printEffectiveConfig(const Config& config);
 void printModuleInfo();
+
+// v0.6 Color preset helpers
+void applyColorPreset(Config& config, const std::string& presetName);
+void cycleColorPreset(Config& config);
+std::string getActiveColorPresetName(const Config& config);
+
+void captureBaseColors(Config& config);
+void restoreBaseColors(Config& config);
