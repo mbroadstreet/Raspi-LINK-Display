@@ -549,14 +549,10 @@ height=320
     {
         // config-defined presets still override after reload
         std::ofstream tmp("/tmp/test_reload_preset.conf");
-        tmp << "color_presets=high_contrast
-";
-        tmp << "color_preset=high_contrast
-";
-        tmp << "color_preset.high_contrast.name=HC
-";
-        tmp << "color_preset.high_contrast.tempo_color=1,2,3,255
-";
+        tmp << "color_presets=high_contrast\n";
+        tmp << "color_preset=high_contrast\n";
+        tmp << "color_preset.high_contrast.name=HC\n";
+        tmp << "color_preset.high_contrast.tempo_color=1,2,3,255\n";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_reload_preset.conf"});
         expect("preset_override_before", c.tempoColor.r == 1);
