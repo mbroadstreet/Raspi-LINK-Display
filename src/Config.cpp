@@ -558,6 +558,9 @@ static std::string getRequiredCliValue(int& i, int argc, char** argv, const std:
 Config parseConfig(int argc, char** argv)
 {
     Config config;
+    for (int i = 1; i < argc; ++i) {
+        config.originalCliArgs.push_back(argv[i]);
+    }
     config.fontPath = findDefaultFontPath();
 
     // v0.6 Built-in color presets (active when no config file or file omits color_presets=)
@@ -603,6 +606,7 @@ Config parseConfig(int argc, char** argv)
         int errorCount = 0;
         loadConfigFile(config, configFilePath, errorCount);
         config.configPath = configFilePath;
+        config.startupConfigPath = configFilePath;
 
         if (errorCount > 0 && configFileExplicitlyRequested)
         {
@@ -619,6 +623,7 @@ Config parseConfig(int argc, char** argv)
             int errorCount = 0;
             loadConfigFile(config, defaultPath, errorCount);
             config.configPath = defaultPath;
+            config.startupConfigPath = defaultPath;
         }
     }
 
@@ -786,10 +791,111 @@ void printModuleInfo()
         << "primary_protocols=ableton-link\n"
         << "inputs=keyboard\n"
         << "outputs=sdl2-display,console-no-gui\n"
-        << "controls=F1,F,P,Q,Esc\n"
+        << "controls=F1,F,P,R,Q,Esc\n"
         << "config_file=config/link-pi-display.example.conf\n"
         << "external_control=not implemented\n"
         << "container_integration=future\n"
         << "manual_start=true\n"
         << "systemd_enabled=false\n";
 }
+
+
+bool tryReloadConfig(Config& config) {
+    if (config.startupConfigPath.empty() && config.originalCliArgs.empty()) {
+        std::cerr << "Warning: no startup info for reload
+";
+        return false;
+    }
+    Config previous = config;
+    try {
+        Config fresh;
+        fresh.fontPath = findDefaultFontPath();
+
+        // v0.6 Built-in color presets
+        fresh.colorPresetNames = {"default", "high_contrast"};
+        fresh.colorPresetLabels["default"] = "Default";
+        fresh.colorPresetLabels["high_contrast"] = "High Contrast";
+        fresh.initialColorPreset = "default";
+
+        fresh.colorPresetOverrides["high_contrast"]["status_inactive_color"] = {220, 220, 220, 255};
+        fresh.colorPresetOverrides["high_contrast"]["status_no_peers_color"] = {220, 220, 220, 255};
+        fresh.colorPresetOverrides["high_contrast"]["status_connected_color"] = {255, 255, 255, 255};
+        fresh.colorPresetOverrides["high_contrast"]["tempo_color"] = {255, 255, 255, 255};
+        fresh.colorPresetOverrides["high_contrast"]["phase_bar_color"] = {255, 255, 255, 255};
+        fresh.colorPresetOverrides["high_contrast"]["phase_marker_color"] = {0, 0, 0, 255};
+        fresh.colorPresetOverrides["high_contrast"]["top_band_color"] = {0, 0, 0, 255};
+        fresh.colorPresetOverrides["high_contrast"]["center_band_color"] = {0, 0, 0, 255};
+        fresh.colorPresetOverrides["high_contrast"]["bottom_band_color"] = {0, 0, 0, 255};
+        fresh.colorPresetOverrides["high_contrast"]["help_overlay_background_color"] = {0, 0, 0, 230};
+        fresh.colorPresetOverrides["high_contrast"]["help_overlay_text_color"] = {255, 255, 255, 255};
+
+        int errorCount = 0;
+        std::string path = config.startupConfigPath;
+        if (!path.empty()) {
+            loadConfigFile(fresh, path, errorCount);
+            if (errorCount > 0) {
+                std::cerr << "Reload: failed to load " << path << std::endl;
+                config = previous;
+                return false;
+            }
+            fresh.configPath = path;
+            fresh.startupConfigPath = path;
+        }
+
+        // Re-apply CLI overrides from original
+        for (size_t i = 0; i < config.originalCliArgs.size(); ++i) {
+            std::string arg = config.originalCliArgs[i];
+            if (arg == "--windowed") fresh.fullscreen = false;
+            else if (arg == "--no-gui") fresh.noGui = true;
+            else if (arg == "--tempo" && i+1 < config.originalCliArgs.size()) {
+                try { fresh.initialTempo = std::stod(config.originalCliArgs[++i]); } catch (...) {}
+            }
+            else if (arg == "--quantum" && i+1 < config.originalCliArgs.size()) {
+                try { fresh.quantum = std::stod(config.originalCliArgs[++i]); } catch (...) {}
+            }
+            else if (arg == "--config") {
+                if (i+1 < config.originalCliArgs.size()) ++i;
+            }
+        }
+
+        // alias fallback
+        if (fresh.backgroundColorExplicit && !fresh.centerBandColorExplicit) {
+            fresh.centerBandColor = fresh.backgroundColor;
+        }
+        if (fresh.bandColorExplicit) {
+            if (!fresh.topBandColorExplicit) fresh.topBandColor = fresh.bandColor;
+            if (!fresh.bottomBandColorExplicit) fresh.bottomBandColor = fresh.bandColor;
+        }
+
+        // validate presets
+        for (const auto& id : fresh.colorPresetNames) {
+            bool hasDef = (fresh.colorPresetLabels.find(id) != fresh.colorPresetLabels.end()) ||
+                          (fresh.colorPresetOverrides.find(id) != fresh.colorPresetOverrides.end());
+            if (!hasDef) {
+                std::cerr << "Reload: preset " << id << " has no definition
+";
+                config = previous;
+                return false;
+            }
+        }
+
+        captureBaseColors(fresh);
+
+        if (!fresh.colorPresetNames.empty()) {
+            std::string startPreset = fresh.initialColorPreset.empty() ? fresh.colorPresetNames[0] : fresh.initialColorPreset;
+            auto it = std::find(fresh.colorPresetNames.begin(), fresh.colorPresetNames.end(), startPreset);
+            if (it != fresh.colorPresetNames.end()) {
+                fresh.activeColorPresetIndex = static_cast<int>(std::distance(fresh.colorPresetNames.begin(), it));
+                applyColorPreset(fresh, startPreset);
+            }
+        }
+
+        config = fresh;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Reload error: " << e.what() << std::endl;
+        config = previous;
+        return false;
+    }
+}
+

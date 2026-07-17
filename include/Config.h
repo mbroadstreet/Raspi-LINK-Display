@@ -84,6 +84,8 @@ struct Config
 
     // Runtime
     std::string configPath;
+    std::string startupConfigPath;
+    std::vector<std::string> originalCliArgs;
 
     // v0.5 inspection modes (early exit)
     bool printConfig = false;
@@ -115,3 +117,6 @@ std::string getActiveColorPresetName(const Config& config);
 
 void captureBaseColors(Config& config);
 void restoreBaseColors(Config& config);
+
+// v0.6 Ticket 3: runtime reload
+bool tryReloadConfig(Config& config);

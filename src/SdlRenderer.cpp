@@ -161,6 +161,20 @@ bool SdlRenderer::pollQuit()
                     std::cout << "No color presets configured." << std::endl;
                 }
             }
+
+            if (key == SDLK_r)
+            {
+                if (tryReloadConfig(config_))
+                {
+                    // Re-apply fonts if sizes changed? For now, colors and presets updated.
+                    // Note: window size not recreated per rules.
+                    std::cout << "Config reloaded." << std::endl;
+                }
+                else
+                {
+                    std::cout << "Config reload failed (kept current)." << std::endl;
+                }
+            }
         }
     }
 
@@ -326,7 +340,7 @@ void SdlRenderer::renderHelpOverlay()
     SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
 
     const int w = 280;
-    const int h = 90;
+    const int h = 110;
     const int x = (outputW - w) / 2;
     const int y = 20;
 
@@ -346,4 +360,5 @@ void SdlRenderer::renderHelpOverlay()
     renderCenteredText("Q / Esc  Quit", helpFont_, {x, y + 28, w, 20}, textColor);
     renderCenteredText("F        Toggle Fullscreen", helpFont_, {x, y + 48, w, 20}, textColor);
     renderCenteredText("P        Color preset", helpFont_, {x, y + 68, w, 20}, textColor);
+    renderCenteredText("R        Reload config", helpFont_, {x, y + 88, w, 20}, textColor);
 }

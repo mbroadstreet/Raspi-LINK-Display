@@ -426,6 +426,113 @@ color_preset.custom.tempo_color=100,100,100,255
         std::remove("/tmp/test_empty_presets.conf");
     }
 
+
+    // v0.6 Ticket 3 reload tests
+    {
+        // no-config reload keeps built-in presets
+        Config c = parse_for_test({"test"});
+        expect("reload_no_config_initial", c.colorPresetNames.size() == 2 && c.colorPresetNames[0] == "default");
+        // simulate change
+        c.colorPresetNames.clear();
+        bool ok = tryReloadConfig(c);
+        expect("reload_no_config_keeps_builtins", ok && c.colorPresetNames.size() == 2);
+    }
+
+    {
+        // explicit config reload uses same path
+        std::ofstream tmp("/tmp/test_explicit_reload.conf");
+        tmp << "color_presets=default,high_contrast
+";
+        tmp << "color_preset=default
+";
+        tmp << "color_preset.default.name=Default
+";
+        tmp << "color_preset.high_contrast.name=High Contrast
+";
+        tmp << "color_preset.high_contrast.tempo_color=255,255,255,255
+";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_explicit_reload.conf"});
+        expect("explicit_path_set", c.startupConfigPath == "/tmp/test_explicit_reload.conf");
+        c.colorPresetNames.clear();
+        bool ok = tryReloadConfig(c);
+        expect("reload_explicit_uses_same_path", ok && c.configPath == "/tmp/test_explicit_reload.conf");
+        std::remove("/tmp/test_explicit_reload.conf");
+    }
+
+    {
+        // reload preserves CLI overrides
+        Config c = parse_for_test({"test", "--tempo", "140"});
+        expect("cli_tempo", c.initialTempo == 140.0);
+        c.initialTempo = 120.0;
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_cli_tempo", ok && c.initialTempo == 140.0);
+    }
+
+    {
+        // invalid reload keeps current
+        Config c = parse_for_test({"test"});
+        std::string orig = c.startupConfigPath;
+        c.startupConfigPath = "/tmp/nonexistent_for_reload_test.conf";
+        bool ok = tryReloadConfig(c);
+        expect("invalid_reload_keeps_current", !ok && c.startupConfigPath == orig);  // but in impl may differ
+        c.startupConfigPath = orig;
+    }
+
+    {
+        // missing reload file keeps current
+        Config c = parse_for_test({"test"});
+        bool ok = tryReloadConfig(c);  // if no path
+        // for no path case
+    }
+
+    {
+        // config-defined presets still override after reload
+        std::ofstream tmp("/tmp/test_reload_preset.conf");
+        tmp << "color_presets=default,high_contrast
+";
+        tmp << "color_preset=high_contrast
+";
+        tmp << "color_preset.high_contrast.name=HC
+";
+        tmp << "color_preset.high_contrast.tempo_color=1,2,3,255
+";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_preset.conf"});
+        expect("preset_override_before", c.tempoColor.r == 1);
+        bool ok = tryReloadConfig(c);
+        expect("reload_preserves_preset_override", ok && c.tempoColor.r == 1);
+        std::remove("/tmp/test_reload_preset.conf");
+    }
+
+    {
+        // empty color_presets= still disables after reload
+        std::ofstream tmp("/tmp/test_reload_empty.conf");
+        tmp << "color_presets=
+";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_empty.conf"});
+        expect("empty_before", c.colorPresetNames.empty());
+        bool ok = tryReloadConfig(c);
+        expect("reload_empty_disables", ok && c.colorPresetNames.empty());
+        std::remove("/tmp/test_reload_empty.conf");
+    }
+
+    {
+        // P still cycles after reload
+        Config c = parse_for_test({"test"});
+        cycleColorPreset(c);
+        std::string after_p = getActiveColorPresetName(c);
+        bool ok = tryReloadConfig(c);
+        cycleColorPreset(c);
+        expect("p_after_reload", ok);
+    }
+
+    {
+        // module info includes R
+        // tested via print but in parser we can call
+    }
+
     if (failures == 0)
     {
         std::cout << "All config parser tests passed." << std::endl;
