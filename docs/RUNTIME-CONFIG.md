@@ -34,7 +34,7 @@ Pressing `R` in GUI mode reloads the configuration source while the application 
 - Re-apply original CLI overrides on every successful reload (including repeated reloads):
   `--windowed`, `--no-gui`, `--width`, `--height`, `--font`, `--tempo`, `--quantum`.
 - Skip `--config` as a visual override while retaining `startupConfigPath` as the reload source.
-- On success, apply safe live visual updates (colors, preset definitions/order/initial, phase-bar layout values that remain usable on the live window, help-overlay settings, hide-cursor preference, and successfully reopened fonts).
+- On success, apply safe live visual updates (colors, preset definitions/order/initial, phase-bar layout values that remain usable on the live window, help-overlay settings, hide-cursor preference, and successfully reopened fonts). Successful R resets the active preset from the file’s `color_preset=<id>` (or first listed / built-in default rules), not from an in-session P position that is not the file start preset.
 - On failure (missing/invalid/unparsable/unusable layout/font open failure): keep the complete previous working Config and fonts; print a nonfatal diagnostic; leave the app running.
 
 ### Strict startup is preserved
@@ -78,16 +78,38 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 - File `color_presets=` list replaces built-ins; omitted list keeps built-ins; empty list disables presets (P no-op).
 - P continues to work after a successful R.
 
+### Base / Default Colors vs presets
+
+- **Base / Default Colors** are the top-level color keys in the config (or built-in defaults when no file supplies them). They are the required base layer for normal appearance.
+- A **label-only** preset (for example `color_preset.default.name=Default` with **no** `color_preset.default.*_color` keys) does not force color overrides. Activating it restores the captured base colors.
+- A **partial** preset may define only some `color_preset.<id>.*_color` keys. Unspecified colors **inherit from the base layer**, not from the previously active preset.
+- Repeating every base color under `color_preset.default.*` is redundant when `default` is intended as base restore; keep `.name` only unless you deliberately want `default` to force overrides.
+
+### File-defined preset list behavior
+
+| `color_presets=` in file | Effect |
+|---|---|
+| Present with one or more IDs | Replaces the built-in preset list with that order |
+| Omitted entirely | Built-in presets remain available |
+| Present but empty (`color_presets=`) | Presets disabled; P is a no-op |
+
+`color_preset=<id>` selects the initial active preset at startup and after a **successful R** (reload re-applies the file’s initial `color_preset` and does not keep a mid-session P selection unless that id is still the file’s start preset).
+
 ### Config syntax
 
 ```ini
-color_presets=default,high_contrast,warm_dim
+color_presets=default,high_contrast
 color_preset=default
 
+# Label-only default: restores Base / Default Colors
 color_preset.default.name=Default
-color_preset.default.tempo_color=64,79,96,255
-# ... other color_preset.<id>.<color_key> entries ...
+
+# Alternate: only overrides listed colors; rest inherit Base
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.tempo_color=255,255,255,255
 ```
+
+See `config/link-pi-display.example.conf` for a Pi-terminal-oriented layout: short R/P guidance and Base colors near the top, `high_contrast` overrides later.
 
 ## Help Overlay
 

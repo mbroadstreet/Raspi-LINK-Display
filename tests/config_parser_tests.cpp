@@ -79,6 +79,49 @@ int main(int argc, char** argv)
         expect("example_config_width", c.width == 480);
         expect("example_config_hide_mouse", c.hideMouseCursor == true);
         expect("example_config_top_band", c.topBandColor.r == 0 && c.topBandColor.g == 0 && c.topBandColor.b == 0);
+
+        // UX clarity: example conf parses with label-only default + base colors
+        expect("example_config_parses_presets_order",
+               c.colorPresetNames.size() == 2
+               && c.colorPresetNames[0] == "default"
+               && c.colorPresetNames[1] == "high_contrast");
+        expect("example_config_default_active", getActiveColorPresetName(c) == "default");
+        expect("example_config_default_label_only",
+               c.colorPresetLabels.count("default") == 1
+               && c.colorPresetLabels["default"] == "Default"
+               && c.colorPresetOverrides.count("default") == 0);
+        expect("example_config_base_tempo_effective",
+               c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
+        expect("example_config_base_status_connected",
+               c.statusConnectedColor.r == 75 && c.statusConnectedColor.g == 85 && c.statusConnectedColor.b == 95);
+        expect("example_config_base_center_band",
+               c.centerBandColor.r == 18 && c.centerBandColor.g == 18 && c.centerBandColor.b == 18);
+        expect("example_config_base_phase_bar",
+               c.phaseBarColor.r == 83 && c.phaseBarColor.g == 114 && c.phaseBarColor.b == 151);
+
+        const int base_tempo_r = c.tempoColor.r;
+        const int base_tempo_g = c.tempoColor.g;
+        const int base_tempo_b = c.tempoColor.b;
+        const int base_center_r = c.centerBandColor.r;
+        const int base_marker_r = c.phaseMarkerColor.r;
+
+        cycleColorPreset(c);  // default -> high_contrast
+        expect("example_config_high_contrast_active", getActiveColorPresetName(c) == "high_contrast");
+        expect("example_config_high_contrast_tempo",
+               c.tempoColor.r == 255 && c.tempoColor.g == 255 && c.tempoColor.b == 255);
+        expect("example_config_high_contrast_marker",
+               c.phaseMarkerColor.r == 0 && c.phaseMarkerColor.g == 0 && c.phaseMarkerColor.b == 0);
+        expect("example_config_high_contrast_center",
+               c.centerBandColor.r == 0 && c.centerBandColor.g == 0 && c.centerBandColor.b == 0);
+
+        cycleColorPreset(c);  // high_contrast -> default restores base
+        expect("example_config_cycle_back_default", getActiveColorPresetName(c) == "default");
+        expect("example_config_cycle_restores_base_tempo",
+               c.tempoColor.r == base_tempo_r && c.tempoColor.g == base_tempo_g && c.tempoColor.b == base_tempo_b);
+        expect("example_config_cycle_restores_base_center",
+               c.centerBandColor.r == base_center_r);
+        expect("example_config_cycle_restores_base_marker",
+               c.phaseMarkerColor.r == base_marker_r && c.phaseMarkerColor.r == 255);
     }
 
     {
