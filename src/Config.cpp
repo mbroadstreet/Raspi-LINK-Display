@@ -286,6 +286,7 @@ static void registerPresetColor(Config& config, const std::string& presetId, con
 }
 
 void applyColorPreset(Config& config, const std::string& presetName) {
+    restoreBaseColors(config);
     auto it = config.colorPresetOverrides.find(presetName);
     if (it == config.colorPresetOverrides.end()) return;
     const auto& overrides = it->second;
@@ -318,6 +319,34 @@ std::string getActiveColorPresetName(const Config& config) {
         return config.colorPresetNames[config.activeColorPresetIndex];
     }
     return "";
+}
+
+void captureBaseColors(Config& config) {
+    config.baseStatusInactiveColor = config.statusInactiveColor;
+    config.baseStatusNoPeersColor = config.statusNoPeersColor;
+    config.baseStatusConnectedColor = config.statusConnectedColor;
+    config.baseTempoColor = config.tempoColor;
+    config.basePhaseBarColor = config.phaseBarColor;
+    config.basePhaseMarkerColor = config.phaseMarkerColor;
+    config.baseTopBandColor = config.topBandColor;
+    config.baseCenterBandColor = config.centerBandColor;
+    config.baseBottomBandColor = config.bottomBandColor;
+    config.baseHelpOverlayBackgroundColor = config.helpOverlayBackgroundColor;
+    config.baseHelpOverlayTextColor = config.helpOverlayTextColor;
+}
+
+void restoreBaseColors(Config& config) {
+    config.statusInactiveColor = config.baseStatusInactiveColor;
+    config.statusNoPeersColor = config.baseStatusNoPeersColor;
+    config.statusConnectedColor = config.baseStatusConnectedColor;
+    config.tempoColor = config.baseTempoColor;
+    config.phaseBarColor = config.basePhaseBarColor;
+    config.phaseMarkerColor = config.basePhaseMarkerColor;
+    config.topBandColor = config.baseTopBandColor;
+    config.centerBandColor = config.baseCenterBandColor;
+    config.bottomBandColor = config.baseBottomBandColor;
+    config.helpOverlayBackgroundColor = config.baseHelpOverlayBackgroundColor;
+    config.helpOverlayTextColor = config.baseHelpOverlayTextColor;
 }
 
 static void loadConfigFile(Config& config, const std::string& path, int& errorCount)
@@ -669,6 +698,9 @@ Config parseConfig(int argc, char** argv)
             std::exit(1);
         }
     }
+
+    // Capture base colors AFTER all defaults/file/CLI/alias/validation, BEFORE initial preset apply
+    captureBaseColors(config);
 
     // v0.6: Apply initial color preset if defined
     if (!config.colorPresetNames.empty())
