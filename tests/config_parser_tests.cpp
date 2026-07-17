@@ -361,22 +361,31 @@ color_preset.foo.tempo_color=999,0,0,255
         expect("example_cycle_default_restores_tempo", c.tempoColor.r == base_tempo_r);
     }
 
-    // Test partial preset inherits from base (after cycling)
+    // Test partial preset inherits from base after a previous preset was active
     {
         std::ofstream tmp("/tmp/test_partial.conf");
         tmp << R"CFG(color_presets=default,high_contrast,partial
-color_preset=partial
+color_preset=default
+color_preset.default.name=Default
+color_preset.high_contrast.name=High Contrast
+color_preset.high_contrast.tempo_color=255,255,255,255
+color_preset.high_contrast.phase_marker_color=0,0,0,255
 color_preset.partial.name=Partial
 color_preset.partial.tempo_color=50,50,50,255
 )CFG";
         tmp.close();
+
         Config c = parse_for_test({"test", "--config", "/tmp/test_partial.conf"});
-        cycleColorPreset(c);  // high_contrast
-        cycleColorPreset(c);  // default (base)
-        cycleColorPreset(c);  // partial -> should use base for non-overridden + override for tempo
+
+        cycleColorPreset(c);  // default -> high_contrast
+        expect("partial_test_high_phase_marker", c.phaseMarkerColor.r == 0);
+
+        cycleColorPreset(c);  // high_contrast -> partial
         expect("partial_after_cycle_tempo_override", c.tempoColor.r == 50);
+
         // other colors should be base, not previous high_contrast
-        expect("partial_inherits_base_phase", c.phaseMarkerColor.r == 255);  // base
+        expect("partial_inherits_base_phase", c.phaseMarkerColor.r == 255);
+
         std::remove("/tmp/test_partial.conf");
     }
 
