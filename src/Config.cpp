@@ -805,6 +805,7 @@ bool tryReloadConfig(Config& config) {
     try {
         Config fresh;
         fresh.fontPath = findDefaultFontPath();
+        fresh.originalCliArgs = previous.originalCliArgs;
 
         // v0.6 Built-in color presets
         fresh.colorPresetNames = {"default", "high_contrast"};
@@ -887,10 +888,13 @@ bool tryReloadConfig(Config& config) {
         if (!fresh.colorPresetNames.empty()) {
             std::string startPreset = fresh.initialColorPreset.empty() ? fresh.colorPresetNames[0] : fresh.initialColorPreset;
             auto it = std::find(fresh.colorPresetNames.begin(), fresh.colorPresetNames.end(), startPreset);
-            if (it != fresh.colorPresetNames.end()) {
-                fresh.activeColorPresetIndex = static_cast<int>(std::distance(fresh.colorPresetNames.begin(), it));
-                applyColorPreset(fresh, startPreset);
+            if (it == fresh.colorPresetNames.end()) {
+                std::cerr << "Reload: color_preset '" << startPreset << "' not listed in color_presets" << std::endl;
+                config = previous;
+                return false;
             }
+            fresh.activeColorPresetIndex = static_cast<int>(std::distance(fresh.colorPresetNames.begin(), it));
+            applyColorPreset(fresh, startPreset);
         }
 
         config = fresh;

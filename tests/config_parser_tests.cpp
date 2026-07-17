@@ -520,6 +520,15 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
+        // repeated reload preserves CLI overrides
+        Config c = parse_for_test({"test", "--width", "640", "--windowed"});
+        expect("cli_width_windowed", c.width == 640 && c.fullscreen == false);
+        bool ok1 = tryReloadConfig(c);
+        bool ok2 = tryReloadConfig(c);
+        expect("repeated_reload_preserves_cli", ok1 && ok2 && c.width == 640 && c.fullscreen == false);
+    }
+
+    {
         // invalid reload keeps current (real explicit-config failure test)
         std::ofstream tmp("/tmp/test_valid_for_corrupt.conf");
         tmp << R"CFG(width=480
@@ -540,12 +549,14 @@ height=320
     {
         // config-defined presets still override after reload
         std::ofstream tmp("/tmp/test_reload_preset.conf");
-        tmp << R"CFG(color_presets=default,high_contrast
-color_preset=high_contrast
-color_preset.default.name=Default
-color_preset.high_contrast.name=HC
-color_preset.high_contrast.tempo_color=1,2,3,255
-)CFG";
+        tmp << "color_presets=high_contrast
+";
+        tmp << "color_preset=high_contrast
+";
+        tmp << "color_preset.high_contrast.name=HC
+";
+        tmp << "color_preset.high_contrast.tempo_color=1,2,3,255
+";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_reload_preset.conf"});
         expect("preset_override_before", c.tempoColor.r == 1);
