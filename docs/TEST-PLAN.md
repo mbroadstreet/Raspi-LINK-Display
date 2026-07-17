@@ -129,28 +129,41 @@ These should fail with clear error and non-zero exit, without starting SDL or Li
 - Config defaults unchanged
 - Existing v0.4 tests still valid
 
-## Planned Runtime Visual Config Testing (v0.6+)
+## Runtime Visual Config Testing (v0.6)
 
-The following areas are identified for future testing once the corresponding features are implemented. These tests do not exist yet.
+### Color Preset Cycling (P key) — Ticket 2 (accepted on integration baseline)
 
-### Color Preset Cycling (P key)
+- Built-in default/high_contrast cycle without a config file.
+- File-defined `color_presets=` replaces built-ins; empty list disables P.
+- Only colors change; fonts/layout/window/Link unaffected.
+- Base colors restore when returning to the label-only `default` preset.
 
-- Define multiple color presets in a config file.
-- Verify `P` cycles through them in the defined order.
-- Verify only colors change (fonts, layout, and window mode are unaffected).
-- Verify `P` is a no-op (or reports) when no color presets are defined.
+### Runtime Config Reload (R key) — Ticket 3 (branch; Pi acceptance pending)
 
-### Runtime Config Reload (R key)
+Automated (config_parser_tests / direct g++ of Config.cpp):
 
-- Start with a config file.
-- Modify the config file on disk.
-- Press `R` and verify visual updates occur without restarting the application or Ableton Link.
-- Verify that width/height/fullscreen changes are not applied live (warning or deferral).
-- Verify transactional font reload behavior (all fonts must succeed or none are swapped).
+- Correct fixture under `// config-defined presets still override after reload` uses escaped `\n`.
+- Missing explicit reload source returns false; prior state intact; process continues.
+- Existing file overwritten with invalid RGBA or invalid positive integer returns false in-process (no termination); prior Config intact.
+- Invalid preset content (duplicate IDs / undefined listed preset) returns false with full rollback.
+- At least two successful reloads preserve `--windowed`, `--no-gui`, `--width`, `--height`, `--font`, `--tempo`, `--quantum`.
+- P after R changes active preset name to the next preset and wraps to the first.
+- Ticket 2 built-in / empty-disable / base-restore behaviors still hold after reload.
+- Live window width/height/fullscreen remain after reload when candidate differs; safe colors may still apply.
+- `phase_bar_margin` is validated against live width after window deferral.
 
-### Screen Preset Configs
+Manual Pi GUI (required before acceptance; not claimed by Hermes Windows builds):
 
-- Launch with different `--config` files from a future `config/presets/` directory.
-- Verify correct resolution and visual settings are applied at startup.
+- No-config `--windowed`: F1 lists P and R; P cycles; R succeeds; P still cycles; no crash/Link restart/window recreate.
+- Explicit example config: R reloads same path; safe edits apply; P cycles after R; repeated R stable.
+- Invalid existing config while running: nonfatal, previous appearance/fonts retained, P still works; repair file and R succeeds.
+- Font path/size success and nonexistent font failure with full rollback.
+- Width/height/fullscreen file changes warn/defer without window recreate; other safe visuals apply.
+- CLI overrides remain authoritative across repeated R; tempo/quantum do not restart Link.
 
-See `docs/RUNTIME-CONFIG.md` and `docs/SCREEN-PRESETS.md` for the design these tests will validate.
+### Screen Preset Configs — Ticket 4 (not started)
+
+- Future `config/presets/` launch-time configs only after Ticket 3 is accepted.
+- See `docs/SCREEN-PRESETS.md`.
+
+See `docs/RUNTIME-CONFIG.md` for implemented R/P semantics versus Ticket 4.

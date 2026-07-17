@@ -1,122 +1,95 @@
-# Runtime Visual Config (Planned)
+# Runtime Visual Config
 
-This document describes the **planned** runtime visual configuration system for Raspi-LINK-Display.
+This document describes the runtime visual configuration system for Raspi-LINK-Display.
 
-This is a design/spec document. None of the runtime features described here are implemented yet.
+Status (v0.6 path):
+
+- **Color presets / P key (Ticket 2):** implemented and merged on the accepted integration baseline.
+- **Runtime config reload / R key (Ticket 3):** implemented on branch `v0.6-runtime-config-reload` with safe transactional semantics described below. Not Pi-validated or accepted until owner/Pi gates pass.
+- **Screen preset configs (Ticket 4):** not implemented; still future work. Do not confuse with R reload.
 
 ## Conceptual Hierarchy
 
-- **Screen preset** — A complete configuration file selected at launch time. It can define window size, fonts, phase bar dimensions, band colors, and one or more color presets.
-- **Color preset** — A named collection of color values defined *inside* a config file. A color preset overrides only color-related settings.
-- **R key** — Reloads the current config source at runtime.
-- **P key** — Cycles through named color presets defined in the currently loaded config.
+- **Screen preset** — A complete configuration file selected at launch time (Ticket 4). It can define window size, fonts, phase bar dimensions, band colors, and one or more color presets.
+- **Color preset** — A named collection of color values defined *inside* a config file. A color preset overrides only color-related settings. Cycled with **P**.
+- **R key** — Reloads the original startup config source at runtime (visual settings).
+- **P key** — Cycles through named color presets in the currently loaded configuration.
 
-The design intentionally separates launch-time decisions (screen presets) from runtime adjustments (color preset cycling and config reload).
+The design separates launch-time decisions (screen presets / window creation) from runtime adjustments (color preset cycling and config reload).
 
-## R Key — Config Reload (Planned)
+## R Key — Config Reload (Implemented on Ticket 3 branch)
 
-Pressing `R` in GUI mode is intended to reload the configuration source while the application is running.
+Pressing `R` in GUI mode reloads the configuration source while the application is running.
 
-### Intended Behavior
+### Reload source rules
 
-- Reload built-in defaults.
-- If a config file was provided at startup and still exists, reload it.
-- Re-apply the original CLI overrides on top of the reloaded config.
-- Validate the resulting configuration.
-- Apply safe, live visual updates (colors, fonts where possible).
-- Preserve the currently active color preset by name when practical.
+- Explicit startup `--config PATH`: every R reloads that same PATH.
+- Auto-discovered `config/link-pi-display.conf` loaded at startup: every R reloads that same discovered path.
+- No config file loaded at startup: R rebuilds built-in defaults and re-applies original CLI overrides. It does not discover a new file later.
+- Reload never writes a config file.
 
-### Constraints for First Implementation
+### Behavior
 
-The initial R implementation should **not**:
+- Rebuild/validate a complete **candidate** without modifying active state until validation succeeds.
+- Re-apply original CLI overrides on every successful reload (including repeated reloads):
+  `--windowed`, `--no-gui`, `--width`, `--height`, `--font`, `--tempo`, `--quantum`.
+- Skip `--config` as a visual override while retaining `startupConfigPath` as the reload source.
+- On success, apply safe live visual updates (colors, preset definitions/order/initial, phase-bar layout values that remain usable on the live window, help-overlay settings, hide-cursor preference, and successfully reopened fonts).
+- On failure (missing/invalid/unparsable/unusable layout/font open failure): keep the complete previous working Config and fonts; print a nonfatal diagnostic; leave the app running.
+
+### Strict startup is preserved
+
+- Invalid explicitly requested startup config still exits nonzero.
+- Invalid values in auto-discovered startup config still fail fatally via the same shared validators (process exit).
+- Runtime reload uses the **same** validation implementation with a recoverable failure policy (throw + rollback) so invalid existing files cannot terminate the process via `std::exit`.
+
+### Window settings (launch-time)
+
+R does **not**:
 
 - Restart the process
 - Restart Ableton Link
-- Recreate the SDL window
-- Change `width`, `height`, or `fullscreen` at runtime
-- Write any configuration files
+- Recreate, resize, or toggle the SDL window
+- Apply candidate `width`, `height`, or `fullscreen` live
 
-Values that require a restart (window size, fullscreen mode) should be detected and reported/warned rather than applied live.
+If the candidate differs in width/height/fullscreen from the live window, the live values are kept and a restart-required/deferred warning is printed. Other valid visual settings from the same candidate may still commit. After deferral, layout constraints such as `phase_bar_margin` are validated against the **live** width; a larger unapplied candidate width cannot make an unusable margin appear valid.
 
-### Missing Config File Behavior (Planned)
+### Font reload (transactional)
 
-- If an explicit `--config` path was provided at startup and the file is now missing → non-fatal error. Keep the current in-memory configuration and report the problem.
-- If no config file was ever loaded (defaults + CLI only) → reload built-in defaults + re-apply original CLI overrides.
-- This differs from startup behavior, where a missing explicit config is fatal.
+1. Parse and validate the candidate configuration (Config-level).
+2. Attempt to open all four required fonts (status, tempo, bottom, help) into temporary `TTF_Font` objects.
+3. Only if **all** opens succeed: swap them into use, close the old fonts, keep the new Config.
+4. If any font fails: close every temporary font opened during the attempt, restore the previous Config, keep existing fonts, report nonfatal error.
 
-### Font Reload (Planned)
+### Missing / invalid config at reload
 
-A transactional font reload is desirable:
+- Explicit or auto-discovered path missing at reload time → nonfatal; keep previous state.
+- Existing file with invalid numeric/Boolean/RGBA/margin/preset data → nonfatal; keep previous state.
+- This differs from startup, where invalid explicit config (and invalid content through shared fatal validators) still fails the process.
 
-1. Parse and validate the candidate configuration.
-2. Attempt to open all required fonts from the candidate configuration into temporary font objects.
-3. Only if **all** candidate fonts open successfully:
-   - Swap the new fonts into use.
-   - Close the old fonts.
-   - Apply the new visual configuration.
-4. If any font fails to load:
-   - Discard the candidate configuration.
-   - Keep the existing fonts and configuration.
-   - Report the error.
+## P Key — Color Preset Cycling (Implemented, Ticket 2)
 
-This approach avoids leaving the application in a partially configured visual state.
-
-## P Key — Color Preset Cycling (Planned)
-
-Pressing `P` is intended to cycle through named color presets defined in the currently loaded configuration.
-
-### Planned Behavior
-
-- Only colors are changed.
-- Fonts, layout dimensions (`phase_bar_height`, `phase_bar_segment_gap`, `phase_bar_margin`), and window mode are **not** affected.
+- Only colors change.
+- Fonts, layout dimensions, and window mode are not affected by P.
 - No configuration files are written.
-- If the current config defines no color presets, `P` should be a no-op or report "no color presets defined".
+- Built-ins: `default` (label-only base restore) and `high_contrast`.
+- File `color_presets=` list replaces built-ins; omitted list keeps built-ins; empty list disables presets (P no-op).
+- P continues to work after a successful R.
 
-### Proposed Config Syntax
+### Config syntax
 
 ```ini
 color_presets=default,high_contrast,warm_dim
 color_preset=default
 
 color_preset.default.name=Default
-color_preset.default.status_inactive_color=40,44,48,255
-color_preset.default.status_no_peers_color=40,44,48,255
-color_preset.default.status_connected_color=75,85,95,255
 color_preset.default.tempo_color=64,79,96,255
-color_preset.default.phase_bar_color=83,114,151,255
-color_preset.default.phase_marker_color=255,255,255,255
-color_preset.default.top_band_color=0,0,0,255
-color_preset.default.center_band_color=18,18,18,255
-color_preset.default.bottom_band_color=0,0,0,255
-color_preset.default.help_overlay_background_color=0,0,0,220
-color_preset.default.help_overlay_text_color=210,210,210,255
-
-color_preset.high_contrast.name=High Contrast
-color_preset.high_contrast.status_inactive_color=220,220,220,255
-color_preset.high_contrast.status_no_peers_color=220,220,220,255
-color_preset.high_contrast.status_connected_color=255,255,255,255
-color_preset.high_contrast.tempo_color=255,255,255,255
-color_preset.high_contrast.phase_bar_color=255,255,255,255
-color_preset.high_contrast.phase_marker_color=0,0,0,255
-color_preset.high_contrast.top_band_color=0,0,0,255
-color_preset.high_contrast.center_band_color=0,0,0,255
-color_preset.high_contrast.bottom_band_color=0,0,0,255
-color_preset.high_contrast.help_overlay_background_color=0,0,0,230
-color_preset.high_contrast.help_overlay_text_color=255,255,255,255
+# ... other color_preset.<id>.<color_key> entries ...
 ```
 
-### Rules
+## Help Overlay
 
-- `color_presets` defines the cycle order.
-- `color_preset` defines the initial active preset by name.
-- `color_preset.<name>.<key>` entries define named preset values.
-- Top-level color keys continue to act as base/default values.
-- A color preset may override any subset of color keys. Missing keys inherit from the base effective configuration.
-- `--print-config` should report the active color preset and the list of available presets.
-
-## Help Overlay (Planned Additions)
-
-Future help overlay content is expected to include:
+Help includes:
 
 ```
 R Reload config
@@ -125,25 +98,21 @@ P Color preset
 
 Existing controls (`F1`, `F`, `Q`/`Esc`) remain unchanged.
 
-## `--print-config` (Planned Additions)
+## `--print-config`
 
-In addition to current output, `--print-config` is planned to include:
+Includes effective values plus:
 
 ```
-active_color_preset=default
-color_presets=default,high_contrast,warm_dim
+color_presets=...
+active_color_preset=...
 ```
 
-The command will continue to print the final effective color values after any active preset is applied.
+## Implementation order
 
-## Implementation Order (Recommended)
-
-1. `v0.6-color-presets-cycle-key` — Add color preset parsing and the `P` key.
-2. `v0.6-runtime-config-reload` — Add the `R` key with safe reload semantics.
-3. `v0.6-screen-preset-configs` — Add example screen preset configs and supporting documentation.
-
-This ordering allows color preset infrastructure to exist before the more complex reload logic is added.
+1. Ticket 2 color presets / P — done on accepted integration baseline.
+2. Ticket 3 runtime config reload / R — implemented on this feature branch; Pi validation and acceptance pending.
+3. Ticket 4 screen preset configs/docs — not started.
 
 ## Status
 
-All features described in this document are **planned** and not yet implemented. See the linked tickets and ROADMAP.md for current status.
+Do not treat this document as proof of Pi validation, merge, release, or final `v0.6-pi-validated` acceptance. See ROADMAP and the continuation brief for process state.

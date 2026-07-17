@@ -22,24 +22,55 @@ static std::string trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
+// Shared parse-failure policy: startup uses process exit; runtime reload throws for rollback.
+enum class ParseFailurePolicy { ExitProcess, ThrowError };
+static ParseFailurePolicy g_parseFailurePolicy = ParseFailurePolicy::ExitProcess;
+
+class ConfigParseError : public std::runtime_error {
+public:
+    explicit ConfigParseError(const std::string& msg) : std::runtime_error(msg) {}
+};
+
+struct ParseFailurePolicyGuard {
+    ParseFailurePolicy previous;
+    explicit ParseFailurePolicyGuard(ParseFailurePolicy policy)
+        : previous(g_parseFailurePolicy)
+    {
+        g_parseFailurePolicy = policy;
+    }
+    ~ParseFailurePolicyGuard()
+    {
+        g_parseFailurePolicy = previous;
+    }
+};
+
+[[noreturn]] static void failConfig(const std::string& msg)
+{
+    std::cerr << msg;
+    if (msg.empty() || msg.back() != '\n')
+        std::cerr << '\n';
+    if (g_parseFailurePolicy == ParseFailurePolicy::ThrowError)
+        throw ConfigParseError(msg);
+    std::exit(1);
+}
+
 // --- Strict whole-string numeric conversion helpers ---
 static int strictStoi(const std::string& s, const std::string& key, const std::string& path, int lineNumber) {
     std::string t = trim(s);
     if (t.empty()) {
-        std::cerr << "Error: " << key << " must be a valid integer: " << s << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be a valid integer: " + s + " in " + path + ":" + std::to_string(lineNumber));
     }
     size_t pos = 0;
     int v;
     try {
         v = std::stoi(t, &pos);
         if (pos != t.size()) {
-            std::cerr << "Error: " << key << " must be a valid integer (no trailing characters): " << s << " in " << path << ":" << lineNumber << "\n";
-            std::exit(1);
+            failConfig("Error: " + key + " must be a valid integer (no trailing characters): " + s + " in " + path + ":" + std::to_string(lineNumber));
         }
+    } catch (const ConfigParseError&) {
+        throw;
     } catch (...) {
-        std::cerr << "Error: " << key << " must be a valid integer: " << s << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be a valid integer: " + s + " in " + path + ":" + std::to_string(lineNumber));
     }
     return v;
 }
@@ -47,20 +78,19 @@ static int strictStoi(const std::string& s, const std::string& key, const std::s
 static double strictStod(const std::string& s, const std::string& key, const std::string& path, int lineNumber) {
     std::string t = trim(s);
     if (t.empty()) {
-        std::cerr << "Error: " << key << " must be a valid number: " << s << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be a valid number: " + s + " in " + path + ":" + std::to_string(lineNumber));
     }
     size_t pos = 0;
     double v;
     try {
         v = std::stod(t, &pos);
         if (pos != t.size()) {
-            std::cerr << "Error: " << key << " must be a valid number (no trailing characters): " << s << " in " << path << ":" << lineNumber << "\n";
-            std::exit(1);
+            failConfig("Error: " + key + " must be a valid number (no trailing characters): " + s + " in " + path + ":" + std::to_string(lineNumber));
         }
+    } catch (const ConfigParseError&) {
+        throw;
     } catch (...) {
-        std::cerr << "Error: " << key << " must be a valid number: " << s << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be a valid number: " + s + " in " + path + ":" + std::to_string(lineNumber));
     }
     return v;
 }
@@ -82,31 +112,31 @@ static RgbaColor parseRgba(const std::string& value, const std::string& key, con
             size_t pos = 0;
             int v = std::stoi(t, &pos);
             if (pos != t.size()) {
-                std::cerr << "Error: Invalid color component in " << key << " (must be valid integer, no trailing chars): " << value
-                          << " in " << path << ":" << lineNumber << "\n";
-                std::exit(1);
+                failConfig("Error: Invalid color component in " + key + " (must be valid integer, no trailing chars): " + value
+                          + " in " + path + ":" + std::to_string(lineNumber));
             }
             if (v < 0 || v > 255)
             {
-                std::cerr << "Error: Invalid color component in " << key << " (must be 0-255): " << value
-                          << " in " << path << ":" << lineNumber << "\n";
-                std::exit(1);
+                failConfig("Error: Invalid color component in " + key + " (must be 0-255): " + value
+                          + " in " + path + ":" + std::to_string(lineNumber));
             }
             components.push_back(v);
         }
+        catch (const ConfigParseError&)
+        {
+            throw;
+        }
         catch (...)
         {
-            std::cerr << "Error: Invalid color value for " << key << ": " << value
-                      << " in " << path << ":" << lineNumber << "\n";
-            std::exit(1);
+            failConfig("Error: Invalid color value for " + key + ": " + value
+                      + " in " + path + ":" + std::to_string(lineNumber));
         }
     }
 
     if (components.size() != 3 && components.size() != 4)
     {
-        std::cerr << "Error: " << key << " must have 3 or 4 components (r,g,b[,a]): " << value
-                  << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must have 3 or 4 components (r,g,b[,a]): " + value
+                  + " in " + path + ":" + std::to_string(lineNumber));
     }
 
     RgbaColor c;
@@ -125,9 +155,8 @@ static bool parseBool(const std::string& value, const std::string& key, const st
     if (v == "true" || v == "yes" || v == "1" || v == "on") return true;
     if (v == "false" || v == "no" || v == "0" || v == "off") return false;
 
-    std::cerr << "Error: Invalid boolean value for " << key << ": " << value
-              << " (expected true/false/yes/no/1/0/on/off) in " << path << ":" << lineNumber << "\n";
-    std::exit(1);
+    failConfig("Error: Invalid boolean value for " + key + ": " + value
+              + " (expected true/false/yes/no/1/0/on/off) in " + path + ":" + std::to_string(lineNumber));
     return false;
 }
 
@@ -136,8 +165,7 @@ static int parsePositiveInt(const std::string& value, const std::string& key, co
 {
     int v = strictStoi(value, key, path, lineNumber);
     if (v <= 0) {
-        std::cerr << "Error: " << key << " must be > 0: " << value << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be > 0: " + value + " in " + path + ":" + std::to_string(lineNumber));
     }
     return v;
 }
@@ -146,8 +174,7 @@ static int parseNonNegativeInt(const std::string& value, const std::string& key,
 {
     int v = strictStoi(value, key, path, lineNumber);
     if (v < 0) {
-        std::cerr << "Error: " << key << " must be >= 0: " << value << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be >= 0: " + value + " in " + path + ":" + std::to_string(lineNumber));
     }
     return v;
 }
@@ -156,8 +183,7 @@ static int parseHelpOverlaySeconds(const std::string& value, const std::string& 
 {
     int v = strictStoi(value, key, path, lineNumber);
     if (v < 1 || v > 60) {
-        std::cerr << "Error: " << key << " must be between 1 and 60: " << value << " in " << path << ":" << lineNumber << "\n";
-        std::exit(1);
+        failConfig("Error: " + key + " must be between 1 and 60: " + value + " in " + path + ":" + std::to_string(lineNumber));
     }
     return v;
 }
@@ -167,24 +193,22 @@ static int parsePositiveIntCli(const std::string& value, const std::string& opti
 {
     std::string t = trim(value);
     if (t.empty()) {
-        std::cerr << "Error: " << option << " requires a positive numeric value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a positive numeric value");
     }
     size_t pos = 0;
     int v;
     try {
         v = std::stoi(t, &pos);
         if (pos != t.size()) {
-            std::cerr << "Error: " << option << " requires a positive numeric value\n";
-            std::exit(1);
+            failConfig("Error: " + option + " requires a positive numeric value");
         }
+    } catch (const ConfigParseError&) {
+        throw;
     } catch (...) {
-        std::cerr << "Error: " << option << " requires a positive numeric value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a positive numeric value");
     }
     if (v <= 0) {
-        std::cerr << "Error: " << option << " requires a positive numeric value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a positive numeric value");
     }
     return v;
 }
@@ -193,24 +217,22 @@ static double parsePositiveDoubleCli(const std::string& value, const std::string
 {
     std::string t = trim(value);
     if (t.empty()) {
-        std::cerr << "Error: " << option << " requires a positive numeric value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a positive numeric value");
     }
     size_t pos = 0;
     double v;
     try {
         v = std::stod(t, &pos);
         if (pos != t.size()) {
-            std::cerr << "Error: " << option << " requires a positive numeric value\n";
-            std::exit(1);
+            failConfig("Error: " + option + " requires a positive numeric value");
         }
+    } catch (const ConfigParseError&) {
+        throw;
     } catch (...) {
-        std::cerr << "Error: " << option << " requires a positive numeric value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a positive numeric value");
     }
     if (v <= 0.0) {
-        std::cerr << "Error: " << option << " requires a positive numeric value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a positive numeric value");
     }
     return v;
 }
@@ -420,9 +442,8 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 // Practical usable width check
                 if (config.width > 0 && (m * 2 >= config.width))
                 {
-                    std::cerr << "Error: phase_bar_margin too large for width (leaves no usable bar): " << value
-                              << " in " << path << ":" << lineNumber << "\n";
-                    std::exit(1);
+                    failConfig("Error: phase_bar_margin too large for width (leaves no usable bar): " + value
+                              + " in " + path + ":" + std::to_string(lineNumber));
                 }
                 config.phaseBarMargin = m;
             }
@@ -459,13 +480,11 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                     {
                         if (!isValidPresetId(t))
                         {
-                            std::cerr << "Error: Invalid color preset ID '" << t << "' in " << path << ":" << lineNumber << std::endl;
-                            std::exit(1);
+                            failConfig("Error: Invalid color preset ID '" + t + "' in " + path + ":" + std::to_string(lineNumber));
                         }
                         if (std::find(parsedPresets.begin(), parsedPresets.end(), t) != parsedPresets.end())
                         {
-                            std::cerr << "Error: Duplicate color preset ID '" << t << "' in " << path << ":" << lineNumber << std::endl;
-                            std::exit(1);
+                            failConfig("Error: Duplicate color preset ID '" + t + "' in " + path + ":" + std::to_string(lineNumber));
                         }
                         parsedPresets.push_back(t);
                     }
@@ -477,8 +496,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 std::string id = trim(value);
                 if (!isValidPresetId(id))
                 {
-                    std::cerr << "Error: Invalid color preset ID '" << id << "' in " << path << ":" << lineNumber << std::endl;
-                    std::exit(1);
+                    failConfig("Error: Invalid color preset ID '" + id + "' in " + path + ":" + std::to_string(lineNumber));
                 }
                 config.initialColorPreset = id;
             }
@@ -488,16 +506,14 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 size_t dot = rest.find('.');
                 if (dot == std::string::npos)
                 {
-                    std::cerr << "Error: Invalid color preset key format '" << key << "' in " << path << ":" << lineNumber << std::endl;
-                    std::exit(1);
+                    failConfig("Error: Invalid color preset key format '" + key + "' in " + path + ":" + std::to_string(lineNumber));
                 }
                 std::string presetId = rest.substr(0, dot);
                 std::string subkey = rest.substr(dot + 1);
 
                 if (!isValidPresetId(presetId))
                 {
-                    std::cerr << "Error: Invalid color preset ID '" << presetId << "' in " << path << ":" << lineNumber << std::endl;
-                    std::exit(1);
+                    failConfig("Error: Invalid color preset ID '" + presetId + "' in " + path + ":" + std::to_string(lineNumber));
                 }
 
                 if (subkey == "name")
@@ -506,8 +522,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                     std::string label = trim(value);
                     if (label.empty())
                     {
-                        std::cerr << "Error: color_preset." << presetId << ".name requires a non-empty value in " << path << ":" << lineNumber << std::endl;
-                        std::exit(1);
+                        failConfig("Error: color_preset." + presetId + ".name requires a non-empty value in " + path + ":" + std::to_string(lineNumber));
                     }
                     config.colorPresetLabels[presetId] = label;
                     // do not store in overrides, do not parse as color
@@ -517,8 +532,7 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
                 std::string field = colorKeyToField(subkey);
                 if (field.empty())
                 {
-                    std::cerr << "Error: Unknown color key '" << subkey << "' in preset '" << presetId << "' in " << path << ":" << lineNumber << std::endl;
-                    std::exit(1);
+                    failConfig("Error: Unknown color key '" + subkey + "' in preset '" + presetId + "' in " + path + ":" + std::to_string(lineNumber));
                 }
 
                 RgbaColor col = parseRgba(value, key, path, lineNumber);
@@ -528,6 +542,10 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             {
                 std::cerr << "Warning: Unknown config key '" << key << "' in " << path << ":" << lineNumber << "\n";
             }
+        }
+        catch (const ConfigParseError&)
+        {
+            throw;
         }
         catch (const std::exception& e)
         {
@@ -542,14 +560,12 @@ static std::string getRequiredCliValue(int& i, int argc, char** argv, const std:
 {
     if (i + 1 >= argc)
     {
-        std::cerr << "Error: " << option << " requires a value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a value");
     }
     std::string val = argv[++i];
     if (val.rfind("--", 0) == 0)
     {
-        std::cerr << "Error: " << option << " requires a value\n";
-        std::exit(1);
+        failConfig("Error: " + option + " requires a value");
     }
     return val;
 }
@@ -592,8 +608,7 @@ Config parseConfig(int argc, char** argv)
         {
             if (i + 1 >= argc || std::string(argv[i+1]).rfind("--", 0) == 0)
             {
-                std::cerr << "Error: --config requires a PATH argument\n";
-                std::exit(1);
+                failConfig("Error: --config requires a PATH argument");
             }
             configFilePath = argv[++i];
             configFileExplicitlyRequested = true;
@@ -610,8 +625,7 @@ Config parseConfig(int argc, char** argv)
 
         if (errorCount > 0 && configFileExplicitlyRequested)
         {
-            std::cerr << "Error: Specified config file could not be loaded: " << configFilePath << "\n";
-            std::exit(1);
+            failConfig("Error: Specified config file could not be loaded: " + configFilePath);
         }
     }
     else
@@ -654,8 +668,7 @@ Config parseConfig(int argc, char** argv)
         {
             if (i + 1 >= argc || std::string(argv[i+1]).rfind("--", 0) == 0)
             {
-                std::cerr << "Error: --config requires a PATH argument\n";
-                std::exit(1);
+                failConfig("Error: --config requires a PATH argument");
             }
             ++i;  // skip the path value
             continue;
@@ -688,7 +701,7 @@ Config parseConfig(int argc, char** argv)
         {
             std::cerr << "Error: Unknown option: " << arg << "\n";
             printUsage(argv[0]);
-            std::exit(1);
+            failConfig("Error: Unknown option: " + arg);
         }
     }
 
@@ -699,8 +712,7 @@ Config parseConfig(int argc, char** argv)
                       (config.colorPresetOverrides.find(id) != config.colorPresetOverrides.end());
         if (!hasDef)
         {
-            std::cerr << "Error: color preset '" << id << "' is listed in color_presets but has no definition (no color_preset." << id << ".* entries) in " << config.configPath << std::endl;
-            std::exit(1);
+            failConfig("Error: color preset '" + id + "' is listed in color_presets but has no definition (no color_preset." + id + ".* entries) in " + config.configPath);
         }
     }
 
@@ -720,8 +732,7 @@ Config parseConfig(int argc, char** argv)
         auto it = std::find(config.colorPresetNames.begin(), config.colorPresetNames.end(), startPreset);
         if (it == config.colorPresetNames.end())
         {
-            std::cerr << "Error: color_preset '" << startPreset << "' not listed in color_presets" << std::endl;
-            std::exit(1);
+            failConfig("Error: color_preset '" + startPreset + "' not listed in color_presets");
         }
 
         config.activeColorPresetIndex = static_cast<int>(std::distance(config.colorPresetNames.begin(), it));
@@ -801,13 +812,14 @@ void printModuleInfo()
 
 
 bool tryReloadConfig(Config& config) {
-    Config previous = config;
+    const Config previous = config;
+    ParseFailurePolicyGuard policyGuard(ParseFailurePolicy::ThrowError);
     try {
         Config fresh;
         fresh.fontPath = findDefaultFontPath();
         fresh.originalCliArgs = previous.originalCliArgs;
 
-        // v0.6 Built-in color presets
+        // Built-in color presets (same as startup)
         fresh.colorPresetNames = {"default", "high_contrast"};
         fresh.colorPresetLabels["default"] = "Default";
         fresh.colorPresetLabels["high_contrast"] = "High Contrast";
@@ -825,45 +837,59 @@ bool tryReloadConfig(Config& config) {
         fresh.colorPresetOverrides["high_contrast"]["help_overlay_background_color"] = {0, 0, 0, 230};
         fresh.colorPresetOverrides["high_contrast"]["help_overlay_text_color"] = {255, 255, 255, 255};
 
-        int errorCount = 0;
-        std::string path = config.startupConfigPath;
+        const std::string path = previous.startupConfigPath;
         if (!path.empty()) {
+            int errorCount = 0;
             loadConfigFile(fresh, path, errorCount);
             if (errorCount > 0) {
-                std::cerr << "Reload: failed to load " << path << std::endl;
+                std::cerr << "Reload: failed to load " << path
+                          << " (kept previous working configuration)" << std::endl;
                 config = previous;
                 return false;
             }
             fresh.configPath = path;
             fresh.startupConfigPath = path;
+        } else {
+            // No startup config file: rebuild built-ins + original CLI only.
+            fresh.configPath.clear();
+            fresh.startupConfigPath.clear();
         }
 
-        // Re-apply CLI overrides from original
-        for (size_t i = 0; i < config.originalCliArgs.size(); ++i) {
-            std::string arg = config.originalCliArgs[i];
-            if (arg == "--windowed") fresh.fullscreen = false;
-            else if (arg == "--no-gui") fresh.noGui = true;
-            else if (arg == "--width" && i+1 < config.originalCliArgs.size()) {
-                try { fresh.width = std::stoi(config.originalCliArgs[++i]); } catch (...) {}
-            }
-            else if (arg == "--height" && i+1 < config.originalCliArgs.size()) {
-                try { fresh.height = std::stoi(config.originalCliArgs[++i]); } catch (...) {}
-            }
-            else if (arg == "--font" && i+1 < config.originalCliArgs.size()) {
-                fresh.fontPath = config.originalCliArgs[++i];
-            }
-            else if (arg == "--tempo" && i+1 < config.originalCliArgs.size()) {
-                try { fresh.initialTempo = std::stod(config.originalCliArgs[++i]); } catch (...) {}
-            }
-            else if (arg == "--quantum" && i+1 < config.originalCliArgs.size()) {
-                try { fresh.quantum = std::stod(config.originalCliArgs[++i]); } catch (...) {}
-            }
-            else if (arg == "--config") {
-                if (i+1 < config.originalCliArgs.size()) ++i;
+        // Re-apply original CLI overrides with the same strict parsers as startup.
+        // Skip --config as a visual override; retain startupConfigPath as reload source.
+        for (size_t i = 0; i < previous.originalCliArgs.size(); ++i) {
+            const std::string& arg = previous.originalCliArgs[i];
+            if (arg == "--windowed") {
+                fresh.fullscreen = false;
+            } else if (arg == "--no-gui") {
+                fresh.noGui = true;
+            } else if (arg == "--width") {
+                if (i + 1 >= previous.originalCliArgs.size())
+                    failConfig("Error: --width requires a value");
+                fresh.width = parsePositiveIntCli(previous.originalCliArgs[++i], "--width");
+            } else if (arg == "--height") {
+                if (i + 1 >= previous.originalCliArgs.size())
+                    failConfig("Error: --height requires a value");
+                fresh.height = parsePositiveIntCli(previous.originalCliArgs[++i], "--height");
+            } else if (arg == "--font") {
+                if (i + 1 >= previous.originalCliArgs.size())
+                    failConfig("Error: --font requires a value");
+                fresh.fontPath = previous.originalCliArgs[++i];
+            } else if (arg == "--tempo") {
+                if (i + 1 >= previous.originalCliArgs.size())
+                    failConfig("Error: --tempo requires a value");
+                fresh.initialTempo = parsePositiveDoubleCli(previous.originalCliArgs[++i], "--tempo");
+            } else if (arg == "--quantum") {
+                if (i + 1 >= previous.originalCliArgs.size())
+                    failConfig("Error: --quantum requires a value");
+                fresh.quantum = parsePositiveDoubleCli(previous.originalCliArgs[++i], "--quantum");
+            } else if (arg == "--config") {
+                if (i + 1 < previous.originalCliArgs.size())
+                    ++i;
             }
         }
 
-        // alias fallback
+        // Alias fallback (same as startup)
         if (fresh.backgroundColorExplicit && !fresh.centerBandColorExplicit) {
             fresh.centerBandColor = fresh.backgroundColor;
         }
@@ -872,37 +898,76 @@ bool tryReloadConfig(Config& config) {
             if (!fresh.bottomBandColorExplicit) fresh.bottomBandColor = fresh.bandColor;
         }
 
-        // validate presets
+        // Validate listed presets have definitions
         for (const auto& id : fresh.colorPresetNames) {
             bool hasDef = (fresh.colorPresetLabels.find(id) != fresh.colorPresetLabels.end()) ||
                           (fresh.colorPresetOverrides.find(id) != fresh.colorPresetOverrides.end());
             if (!hasDef) {
-                std::cerr << "Reload: preset " << id << " has no definition" << std::endl;
-                config = previous;
-                return false;
+                failConfig("Reload: color preset '" + id + "' is listed in color_presets but has no definition");
             }
+        }
+
+        // Launch-time window settings: keep live values; report deferred candidate differences.
+        const int candidateWidth = fresh.width;
+        const int candidateHeight = fresh.height;
+        const bool candidateFullscreen = fresh.fullscreen;
+        if (candidateWidth != previous.width ||
+            candidateHeight != previous.height ||
+            candidateFullscreen != previous.fullscreen)
+        {
+            std::cerr << "Reload: width/height/fullscreen differ from the live window; "
+                      << "kept current live values (restart required to apply candidate window settings). "
+                      << "candidate width=" << candidateWidth
+                      << " height=" << candidateHeight
+                      << " fullscreen=" << (candidateFullscreen ? "true" : "false")
+                      << "; live width=" << previous.width
+                      << " height=" << previous.height
+                      << " fullscreen=" << (previous.fullscreen ? "true" : "false")
+                      << std::endl;
+        }
+        fresh.width = previous.width;
+        fresh.height = previous.height;
+        fresh.fullscreen = previous.fullscreen;
+
+        // Layout constraints must use the live/output width after deferral.
+        if (fresh.width > 0 && (fresh.phaseBarMargin * 2 >= fresh.width)) {
+            failConfig("Reload: phase_bar_margin too large for live width (leaves no usable bar)");
         }
 
         captureBaseColors(fresh);
 
         if (!fresh.colorPresetNames.empty()) {
-            std::string startPreset = fresh.initialColorPreset.empty() ? fresh.colorPresetNames[0] : fresh.initialColorPreset;
+            std::string startPreset = fresh.initialColorPreset.empty()
+                ? fresh.colorPresetNames[0]
+                : fresh.initialColorPreset;
             auto it = std::find(fresh.colorPresetNames.begin(), fresh.colorPresetNames.end(), startPreset);
             if (it == fresh.colorPresetNames.end()) {
-                std::cerr << "Reload: color_preset '" << startPreset << "' not listed in color_presets" << std::endl;
-                config = previous;
-                return false;
+                failConfig("Reload: color_preset '" + startPreset + "' not listed in color_presets");
             }
             fresh.activeColorPresetIndex = static_cast<int>(std::distance(fresh.colorPresetNames.begin(), it));
             applyColorPreset(fresh, startPreset);
+        } else {
+            fresh.activeColorPresetIndex = -1;
+        }
+
+        // Preserve identity fields needed for future reloads
+        fresh.originalCliArgs = previous.originalCliArgs;
+        if (!path.empty()) {
+            fresh.startupConfigPath = path;
+            fresh.configPath = path;
         }
 
         config = fresh;
         return true;
+    } catch (const ConfigParseError& e) {
+        std::cerr << "Reload: " << e.what()
+                  << " (kept previous working configuration)" << std::endl;
+        config = previous;
+        return false;
     } catch (const std::exception& e) {
-        std::cerr << "Reload error: " << e.what() << std::endl;
+        std::cerr << "Reload error: " << e.what()
+                  << " (kept previous working configuration)" << std::endl;
         config = previous;
         return false;
     }
 }
-

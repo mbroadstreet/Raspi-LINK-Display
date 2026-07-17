@@ -432,7 +432,6 @@ color_preset.custom.tempo_color=100,100,100,255
         // no-config reload keeps built-in presets
         Config c = parse_for_test({"test"});
         expect("reload_no_config_initial", c.colorPresetNames.size() == 2 && c.colorPresetNames[0] == "default");
-        // simulate change
         c.colorPresetNames.clear();
         bool ok = tryReloadConfig(c);
         expect("reload_no_config_keeps_builtins", ok && c.colorPresetNames.size() == 2);
@@ -457,7 +456,7 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        // reload preserves CLI overrides
+        // reload preserves each required CLI override
         Config c = parse_for_test({"test", "--tempo", "140"});
         expect("cli_tempo", c.initialTempo == 140.0);
         c.initialTempo = 120.0;
@@ -466,7 +465,6 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        // reload preserves --width
         Config c = parse_for_test({"test", "--width", "640"});
         expect("cli_width", c.width == 640);
         c.width = 480;
@@ -475,7 +473,6 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        // reload preserves --height
         Config c = parse_for_test({"test", "--height", "400"});
         expect("cli_height", c.height == 400);
         c.height = 320;
@@ -484,7 +481,6 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        // reload preserves --font
         Config c = parse_for_test({"test", "--font", "/fake/font.ttf"});
         expect("cli_font", c.fontPath == "/fake/font.ttf");
         c.fontPath = "default";
@@ -493,25 +489,22 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        // reload preserves --windowed
         Config c = parse_for_test({"test", "--windowed"});
-        expect("cli_windowed", c.fullscreen == false);
+        expect("cli_windowed_reload", c.fullscreen == false);
         c.fullscreen = true;
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_windowed", ok && c.fullscreen == false);
     }
 
     {
-        // reload preserves --no-gui
         Config c = parse_for_test({"test", "--no-gui"});
-        expect("cli_no_gui", c.noGui == true);
+        expect("cli_no_gui_reload", c.noGui == true);
         c.noGui = false;
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_no_gui", ok && c.noGui == true);
     }
 
     {
-        // reload preserves --quantum
         Config c = parse_for_test({"test", "--quantum", "8"});
         expect("cli_quantum", c.quantum == 8.0);
         c.quantum = 4.0;
@@ -520,31 +513,233 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     }
 
     {
-        // repeated reload preserves CLI overrides
-        Config c = parse_for_test({"test", "--width", "640", "--windowed"});
-        expect("cli_width_windowed", c.width == 640 && c.fullscreen == false);
+        // repeated successful reloads preserve every required original CLI override
+        Config c = parse_for_test({
+            "test",
+            "--width", "640",
+            "--height", "400",
+            "--windowed",
+            "--no-gui",
+            "--font", "/fake/font.ttf",
+            "--tempo", "133",
+            "--quantum", "8"
+        });
+        expect("cli_all_set",
+               c.width == 640 && c.height == 400 && c.fullscreen == false && c.noGui == true
+               && c.fontPath == "/fake/font.ttf" && c.initialTempo == 133.0 && c.quantum == 8.0);
         bool ok1 = tryReloadConfig(c);
         bool ok2 = tryReloadConfig(c);
-        expect("repeated_reload_preserves_cli", ok1 && ok2 && c.width == 640 && c.fullscreen == false);
+        expect("repeated_reload_preserves_all_cli",
+               ok1 && ok2
+               && c.width == 640 && c.height == 400 && c.fullscreen == false && c.noGui == true
+               && c.fontPath == "/fake/font.ttf" && c.initialTempo == 133.0 && c.quantum == 8.0
+               && c.originalCliArgs.size() >= 2);
     }
 
     {
-        // invalid reload keeps current (real explicit-config failure test)
+        // missing explicit reload source: nonfatal, complete previous state remains
         std::ofstream tmp("/tmp/test_valid_for_corrupt.conf");
         tmp << R"CFG(width=480
 height=320
+tempo_color=10,20,30,255
 )CFG";
         tmp.close();
         Config c = parse_for_test({"test", "--config", "/tmp/test_valid_for_corrupt.conf"});
-        int orig_width = c.width;
-        std::string orig_path = c.startupConfigPath;
+        const int orig_width = c.width;
+        const int orig_tempo_r = c.tempoColor.r;
+        const std::string orig_path = c.startupConfigPath;
+        const auto orig_cli = c.originalCliArgs;
+        const int orig_preset_index = c.activeColorPresetIndex;
         std::remove("/tmp/test_valid_for_corrupt.conf");
         bool ok = tryReloadConfig(c);
-        expect("invalid_reload_keeps_current", !ok && c.width == orig_width && c.startupConfigPath == orig_path);
-        std::remove("/tmp/test_valid_for_corrupt.conf");  // ensure gone
+        expect("missing_reload_returns_false", !ok);
+        expect("missing_reload_keeps_width", c.width == orig_width);
+        expect("missing_reload_keeps_tempo_color", c.tempoColor.r == orig_tempo_r);
+        expect("missing_reload_keeps_startup_path", c.startupConfigPath == orig_path);
+        expect("missing_reload_keeps_cli_args", c.originalCliArgs == orig_cli);
+        expect("missing_reload_keeps_preset_index", c.activeColorPresetIndex == orig_preset_index);
+        expect("missing_reload_process_continues", true);  // reached after tryReloadConfig
+        std::remove("/tmp/test_valid_for_corrupt.conf");
     }
 
+    {
+        // existing-but-invalid reload: invalid RGBA must return false in-process (no std::exit)
+        std::ofstream tmp("/tmp/test_invalid_existing_reload.conf");
+        tmp << R"CFG(width=480
+height=320
+tempo_color=11,22,33,255
+status_font_size=30
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_invalid_existing_reload.conf", "--windowed"});
+        const int orig_width = c.width;
+        const int orig_tempo_r = c.tempoColor.r;
+        const int orig_tempo_g = c.tempoColor.g;
+        const int orig_tempo_b = c.tempoColor.b;
+        const std::string orig_path = c.startupConfigPath;
+        const auto orig_cli = c.originalCliArgs;
+        const bool orig_fullscreen = c.fullscreen;
+        const int orig_status_font = c.statusFontSize;
+        const auto orig_base_tempo = c.baseTempoColor;
+        const int orig_active = c.activeColorPresetIndex;
 
+        {
+            std::ofstream bad("/tmp/test_invalid_existing_reload.conf");
+            bad << "tempo_color=999,0,0,255\n";
+            bad << "width=480\n";
+            bad.close();
+        }
+
+        bool ok = tryReloadConfig(c);
+        // Next assertions must execute: proves no process termination.
+        expect("invalid_existing_reload_returns_false", !ok);
+        expect("invalid_existing_reload_keeps_width", c.width == orig_width);
+        expect("invalid_existing_reload_keeps_tempo",
+               c.tempoColor.r == orig_tempo_r && c.tempoColor.g == orig_tempo_g && c.tempoColor.b == orig_tempo_b);
+        expect("invalid_existing_reload_keeps_path", c.startupConfigPath == orig_path);
+        expect("invalid_existing_reload_keeps_cli", c.originalCliArgs == orig_cli);
+        expect("invalid_existing_reload_keeps_fullscreen", c.fullscreen == orig_fullscreen);
+        expect("invalid_existing_reload_keeps_status_font", c.statusFontSize == orig_status_font);
+        expect("invalid_existing_reload_keeps_base_tempo",
+               c.baseTempoColor.r == orig_base_tempo.r && c.baseTempoColor.g == orig_base_tempo.g);
+        expect("invalid_existing_reload_keeps_active_index", c.activeColorPresetIndex == orig_active);
+        expect("invalid_existing_reload_process_continues", true);
+        std::remove("/tmp/test_invalid_existing_reload.conf");
+    }
+
+    {
+        // existing-but-invalid numeric value also nonfatal
+        std::ofstream tmp("/tmp/test_invalid_numeric_reload.conf");
+        tmp << "status_font_size=30\n";
+        tmp << "tempo_color=1,2,3,255\n";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_invalid_numeric_reload.conf"});
+        const int orig_font = c.statusFontSize;
+        const int orig_r = c.tempoColor.r;
+        {
+            std::ofstream bad("/tmp/test_invalid_numeric_reload.conf");
+            bad << "status_font_size=0\n";
+            bad.close();
+        }
+        bool ok = tryReloadConfig(c);
+        expect("invalid_numeric_reload_returns_false", !ok);
+        expect("invalid_numeric_reload_keeps_font", c.statusFontSize == orig_font);
+        expect("invalid_numeric_reload_keeps_tempo", c.tempoColor.r == orig_r);
+        expect("invalid_numeric_reload_process_continues", true);
+        std::remove("/tmp/test_invalid_numeric_reload.conf");
+    }
+
+    {
+        // invalid preset content on reload: duplicate IDs -> nonfatal rollback
+        std::ofstream tmp("/tmp/test_invalid_preset_reload.conf");
+        tmp << R"CFG(color_presets=default,high_contrast
+color_preset=default
+color_preset.default.name=Default
+color_preset.high_contrast.name=HC
+color_preset.high_contrast.tempo_color=9,8,7,255
+tempo_color=50,50,50,255
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_invalid_preset_reload.conf"});
+        const int orig_tempo_r = c.tempoColor.r;
+        const auto orig_names = c.colorPresetNames;
+        const std::string orig_path = c.startupConfigPath;
+        const auto orig_cli = c.originalCliArgs;
+        {
+            std::ofstream bad("/tmp/test_invalid_preset_reload.conf");
+            bad << "color_presets=default,default\n";
+            bad << "color_preset.default.name=Default\n";
+            bad.close();
+        }
+        bool ok = tryReloadConfig(c);
+        expect("invalid_preset_reload_returns_false", !ok);
+        expect("invalid_preset_reload_keeps_tempo", c.tempoColor.r == orig_tempo_r);
+        expect("invalid_preset_reload_keeps_names", c.colorPresetNames == orig_names);
+        expect("invalid_preset_reload_keeps_path", c.startupConfigPath == orig_path);
+        expect("invalid_preset_reload_keeps_cli", c.originalCliArgs == orig_cli);
+        expect("invalid_preset_reload_process_continues", true);
+        std::remove("/tmp/test_invalid_preset_reload.conf");
+    }
+
+    {
+        // invalid undefined listed preset on reload
+        std::ofstream tmp("/tmp/test_undefined_preset_reload.conf");
+        tmp << R"CFG(color_presets=default
+color_preset=default
+color_preset.default.name=Default
+tempo_color=12,13,14,255
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_undefined_preset_reload.conf"});
+        const int orig_r = c.tempoColor.r;
+        {
+            std::ofstream bad("/tmp/test_undefined_preset_reload.conf");
+            bad << "color_presets=ghost\n";
+            bad.close();
+        }
+        bool ok = tryReloadConfig(c);
+        expect("undefined_preset_reload_returns_false", !ok);
+        expect("undefined_preset_reload_keeps_tempo", c.tempoColor.r == orig_r);
+        expect("undefined_preset_reload_process_continues", true);
+        std::remove("/tmp/test_undefined_preset_reload.conf");
+    }
+
+    {
+        // live layout: deferred larger candidate width must not allow unusable margin
+        std::ofstream tmp("/tmp/test_margin_vs_live_width.conf");
+        tmp << R"CFG(width=480
+height=320
+phase_bar_margin=24
+tempo_color=1,2,3,255
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_margin_vs_live_width.conf"});
+        expect("margin_live_initial", c.width == 480 && c.phaseBarMargin == 24 && c.tempoColor.r == 1);
+        {
+            // Candidate width would make margin valid; live width remains 480 after deferral.
+            std::ofstream bad("/tmp/test_margin_vs_live_width.conf");
+            bad << "width=2000\n";
+            bad << "phase_bar_margin=300\n";
+            bad << "tempo_color=99,99,99,255\n";
+            bad.close();
+        }
+        bool ok = tryReloadConfig(c);
+        expect("margin_vs_live_width_rejects", !ok);
+        expect("margin_vs_live_width_keeps_width", c.width == 480);
+        expect("margin_vs_live_width_keeps_margin", c.phaseBarMargin == 24);
+        expect("margin_vs_live_width_keeps_tempo", c.tempoColor.r == 1);
+        expect("margin_vs_live_width_process_continues", true);
+        std::remove("/tmp/test_margin_vs_live_width.conf");
+    }
+
+    {
+        // window settings deferred: successful reload keeps live width/height/fullscreen
+        // while applying safe color change; candidate window values are not stored as applied.
+        std::ofstream tmp("/tmp/test_window_defer.conf");
+        tmp << R"CFG(width=480
+height=320
+fullscreen=true
+tempo_color=10,20,30,255
+)CFG";
+        tmp.close();
+        Config c = parse_for_test({"test", "--config", "/tmp/test_window_defer.conf", "--windowed"});
+        expect("window_defer_cli_windowed", c.fullscreen == false && c.width == 480);
+        {
+            std::ofstream next("/tmp/test_window_defer.conf");
+            next << "width=800\n";
+            next << "height=600\n";
+            next << "fullscreen=true\n";
+            next << "tempo_color=40,50,60,255\n";
+            next.close();
+        }
+        bool ok = tryReloadConfig(c);
+        expect("window_defer_reload_ok", ok);
+        expect("window_defer_keeps_live_width", c.width == 480);
+        expect("window_defer_keeps_live_height", c.height == 320);
+        expect("window_defer_keeps_live_fullscreen", c.fullscreen == false);
+        expect("window_defer_applies_color", c.tempoColor.r == 40 && c.tempoColor.g == 50 && c.tempoColor.b == 60);
+        std::remove("/tmp/test_window_defer.conf");
+    }
 
     {
         // config-defined presets still override after reload
@@ -575,18 +770,35 @@ height=320
     }
 
     {
-        // P still cycles after reload
+        // P after R: active name changes to next preset and wraps to first
         Config c = parse_for_test({"test"});
-        cycleColorPreset(c);
-        std::string after_p = getActiveColorPresetName(c);
+        expect("p_after_r_initial_default", getActiveColorPresetName(c) == "default");
         bool ok = tryReloadConfig(c);
+        expect("p_after_r_reload_ok", ok);
+        expect("p_after_r_still_default", getActiveColorPresetName(c) == "default");
+        const std::string before = getActiveColorPresetName(c);
         cycleColorPreset(c);
-        expect("p_after_reload", ok);
+        const std::string after_first = getActiveColorPresetName(c);
+        expect("p_after_r_changes_to_next", after_first == "high_contrast" && after_first != before);
+        cycleColorPreset(c);
+        const std::string after_wrap = getActiveColorPresetName(c);
+        expect("p_after_r_wraps_to_first", after_wrap == "default");
     }
 
     {
-        // module info includes R
-        // tested via print but in parser we can call
+        // Ticket 2 regression: built-in default is label-only base restore via cycle
+        Config c = parse_for_test({"test"});
+        const int base_r = c.tempoColor.r;
+        cycleColorPreset(c); // high_contrast
+        expect("t2_high_contrast_applied", c.tempoColor.r == 255);
+        cycleColorPreset(c); // default base restore
+        expect("t2_default_restores_base", c.tempoColor.r == base_r);
+        bool ok = tryReloadConfig(c);
+        expect("t2_reload_ok", ok);
+        cycleColorPreset(c);
+        expect("t2_p_after_reload_high_contrast", getActiveColorPresetName(c) == "high_contrast" && c.tempoColor.r == 255);
+        cycleColorPreset(c);
+        expect("t2_p_after_reload_wrap_default", getActiveColorPresetName(c) == "default");
     }
 
     if (failures == 0)

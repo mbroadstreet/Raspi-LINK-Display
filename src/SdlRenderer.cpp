@@ -102,6 +102,87 @@ SdlRenderer::~SdlRenderer()
     SDL_Quit();
 }
 
+bool SdlRenderer::tryReplaceFontsFromConfig(const Config& cfg)
+{
+    if (cfg.fontPath.empty())
+    {
+        std::cerr << "Reload: candidate font_path is empty" << std::endl;
+        return false;
+    }
+
+    TTF_Font* status = TTF_OpenFont(cfg.fontPath.c_str(), cfg.statusFontSize);
+    TTF_Font* tempo = nullptr;
+    TTF_Font* bottom = nullptr;
+    TTF_Font* help = nullptr;
+
+    auto closeTemps = [&]() {
+        if (help) { TTF_CloseFont(help); help = nullptr; }
+        if (bottom) { TTF_CloseFont(bottom); bottom = nullptr; }
+        if (tempo) { TTF_CloseFont(tempo); tempo = nullptr; }
+        if (status) { TTF_CloseFont(status); status = nullptr; }
+    };
+
+    if (!status)
+    {
+        std::cerr << "Reload: TTF_OpenFont status failed: " << TTF_GetError() << std::endl;
+        closeTemps();
+        return false;
+    }
+
+    tempo = TTF_OpenFont(cfg.fontPath.c_str(), cfg.tempoFontSize);
+    if (!tempo)
+    {
+        std::cerr << "Reload: TTF_OpenFont tempo failed: " << TTF_GetError() << std::endl;
+        closeTemps();
+        return false;
+    }
+
+    bottom = TTF_OpenFont(cfg.fontPath.c_str(), cfg.bottomFontSize);
+    if (!bottom)
+    {
+        std::cerr << "Reload: TTF_OpenFont bottom failed: " << TTF_GetError() << std::endl;
+        closeTemps();
+        return false;
+    }
+
+    help = TTF_OpenFont(cfg.fontPath.c_str(), cfg.helpFontSize);
+    if (!help)
+    {
+        std::cerr << "Reload: TTF_OpenFont help failed: " << TTF_GetError() << std::endl;
+        closeTemps();
+        return false;
+    }
+
+    // All four opened: swap, then close previous live fonts only after swap.
+    TTF_Font* oldStatus = statusFont_;
+    TTF_Font* oldTempo = tempoFont_;
+    TTF_Font* oldBottom = bottomFont_;
+    TTF_Font* oldHelp = helpFont_;
+
+    statusFont_ = status;
+    tempoFont_ = tempo;
+    bottomFont_ = bottom;
+    helpFont_ = help;
+
+    if (oldHelp) TTF_CloseFont(oldHelp);
+    if (oldBottom) TTF_CloseFont(oldBottom);
+    if (oldTempo) TTF_CloseFont(oldTempo);
+    if (oldStatus) TTF_CloseFont(oldStatus);
+
+    return true;
+}
+
+void SdlRenderer::applyCursorVisibilityFromConfig()
+{
+    // Match live fullscreen state from the window flags, not a deferred config value.
+    const Uint32 flags = SDL_GetWindowFlags(window_);
+    const bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+    if (isFullscreen && config_.hideMouseCursor)
+        SDL_ShowCursor(SDL_DISABLE);
+    else
+        SDL_ShowCursor(SDL_ENABLE);
+}
+
 bool SdlRenderer::pollQuit()
 {
     SDL_Event event;
@@ -164,15 +245,28 @@ bool SdlRenderer::pollQuit()
 
             if (key == SDLK_r)
             {
-                if (tryReloadConfig(config_))
+                // Transactional reload: parse/validate candidate into config_, then swap fonts
+                // only if all four TTF opens succeed. Font failure rolls config_ back.
+                // tryReloadConfig never resizes/recreates the SDL window; width/height/fullscreen
+                // differences are deferred (kept live) with a restart-required warning.
+                const Config previousConfig = config_;
+                if (!tryReloadConfig(config_))
                 {
-                    // Re-apply fonts if sizes changed? For now, colors and presets updated.
-                    // Note: window size not recreated per rules.
-                    std::cout << "Config reloaded." << std::endl;
+                    std::cout << "Config reload failed (kept previous working configuration)." << std::endl;
+                }
+                else if (!tryReplaceFontsFromConfig(config_))
+                {
+                    config_ = previousConfig;
+                    std::cout << "Config reload failed: font open unsuccessful "
+                                 "(kept previous working configuration and fonts)."
+                              << std::endl;
                 }
                 else
                 {
-                    std::cout << "Config reload failed (kept current)." << std::endl;
+                    applyCursorVisibilityFromConfig();
+                    std::cout << "Config reloaded (safe visual settings applied; "
+                                 "window size/fullscreen unchanged live)."
+                              << std::endl;
                 }
             }
         }

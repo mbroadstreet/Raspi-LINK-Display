@@ -107,22 +107,10 @@ cmake --build build --target config_parser_tests -j"$(nproc)"
 
 MIT License — see [LICENSE](LICENSE) file.
 
-## Planned Runtime Configuration (v0.6+)
+## Runtime Configuration (v0.6)
 
-The following capabilities are planned for future releases:
+- **P** — cycle named color presets (Ticket 2; on accepted integration baseline). Only colors change; layout, fonts, and Link state are unaffected. Dot-prefixed syntax: see `config/link-pi-display.example.conf`.
+- **R** — reload the original startup visual-config source (Ticket 3 branch). Missing/invalid reload is nonfatal and keeps the previous working configuration and fonts. Window width/height/fullscreen are not applied live (restart required). Does not restart Link or recreate the SDL window. Not Pi-accepted until owner validation.
+- **Screen preset configs** — Ticket 4, not started (`config/presets/` later).
 
-- `R` key — reload the current config source at runtime (visual settings only in first implementation)
-- `P` key — cycle through named color presets defined in the loaded config
-- Screen preset configs — separate launch-time config files for different displays (see `config/presets/` in the future)
-
-For details see:
-- `docs/RUNTIME-CONFIG.md`
-- `docs/SCREEN-PRESETS.md`
-
-These features are not yet implemented.
-
-## v0.6 Color Presets (P key)
-
-Press **P** to cycle through named color presets defined in the config using dot-prefixed syntax (see config/link-pi-display.example.conf for examples).
-
-Only colors change. Layout, fonts, and Link state are unaffected.
+Details: `docs/RUNTIME-CONFIG.md`, `docs/SCREEN-PRESETS.md`, `docs/TEST-PLAN.md`.

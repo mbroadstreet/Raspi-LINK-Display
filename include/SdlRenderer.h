@@ -27,6 +27,9 @@ private:
     void renderCenteredText(const std::string& text, TTF_Font* font, SDL_Rect area, SDL_Color color);
     void renderBottomPhaseBar(const LinkDisplayState& state, const SDL_Rect& area, SDL_Color barColor, SDL_Color markerColor);
     void renderHelpOverlay();
+    // Open all four candidate fonts; swap only if every open succeeds. On failure close temps and keep old fonts.
+    bool tryReplaceFontsFromConfig(const Config& cfg);
+    void applyCursorVisibilityFromConfig();
 
     Config config_;
     SDL_Window* window_ = nullptr;
