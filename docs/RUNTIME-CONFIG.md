@@ -98,13 +98,16 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 ### Config syntax
 
 ```ini
+# Base / Default color
+tempo_color=64,79,96,255
+
 color_presets=default,high_contrast
 color_preset=default
 
 # Label-only default: restores Base / Default Colors
 color_preset.default.name=Default
 
-# Alternate: only overrides listed colors; rest inherit Base
+# Alternate preset overrides only what differs
 color_preset.high_contrast.name=High Contrast
 color_preset.high_contrast.tempo_color=255,255,255,255
 ```
