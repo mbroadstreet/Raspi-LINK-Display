@@ -187,4 +187,11 @@ Owner-reported Raspberry Pi GUI matrix completed successfully at `ace2a7f` and r
 - Reconfirm F1 title, keys, and actions remain left-aligned, use distinct columns, and are readable/unclipped at 480×320 and 320×240.
 - Reconfirm F toggle/cursor behavior, centered tempo, phase rendering, Link state, and window creation are unchanged; P/R do not restart Link or recreate the SDL window.
 
-The owner reports that the complete targeted Ticket 4 matrix above passed for `ace2a7f`. The parser suite also previously passed under WSL with `-Wall -Wextra -Wpedantic`; its only warning was the pre-existing unused `strictStod()` warning in protected code. Neither the Pi matrix nor runtime build/tests are rerun or reinterpreted by this documentation-only closeout. The new documentation commit remains unpushed and requires supervisor archive review before publication. See `docs/SCREEN-PRESETS.md` and `docs/RUNTIME-CONFIG.md`.
+Owner-reported Ticket 4 burn-in evidence for `ace2a7f`:
+
+- Raspberry Pi 3 B+ Rev3 with touchscreen.
+- Slight underclock: approximately 900 MHz peak / 300 MHz base.
+- Application remained running and network-connected for more than 32 hours.
+- No reported instability during the burn-in.
+
+The owner reports that the complete targeted Ticket 4 matrix above passed for `ace2a7f`. The parser suite also previously passed under WSL with `-Wall -Wextra -Wpedantic`; its only warning was the pre-existing unused `strictStod()` warning in protected code. Neither the Pi matrix nor runtime build/tests are rerun or reinterpreted by this documentation-only closeout; it records inherited validation results and does not represent a new runtime or Raspberry Pi test run. Branch publication, merge, tag, and release status must be determined from repository refs and release records. See `docs/SCREEN-PRESETS.md` and `docs/RUNTIME-CONFIG.md`.

@@ -52,7 +52,7 @@ Runtime visual configuration sequence:
 
 - Color preset parsing and `P` key cycling (`v0.6-color-presets-cycle-key`) — complete.
 - Runtime config reload via `R` key with safe visual updates (`v0.6-runtime-config-reload`) — Ticket 3 published, technically complete, and Pi-validated at `334116f`.
-- Standalone screen configuration files plus left-aligned F1 help (`v0.6-screen-preset-configs`) — Ticket 4 implementation checkpoint `ace2a7f` passed the complete owner/Raspberry Pi validation. Its local documentation closeout requires supervisor archive review before publication.
+- Standalone screen configuration files plus left-aligned F1 help (`v0.6-screen-preset-configs`) — Ticket 4 implementation checkpoint `ace2a7f` passed the complete owner/Raspberry Pi validation. Publication, merge, tag, and release status must be determined from repository refs and release records.
 
 See:
 - `docs/RUNTIME-CONFIG.md`
@@ -63,5 +63,5 @@ These features are intended to be additive and should not affect launch-time beh
 ## v0.6 Status
 - Ticket 2 color presets + P cycle key are complete.
 - Ticket 3 R reload is complete and Pi-validated.
-- Ticket 4 runtime/config/test implementation at `ace2a7f` is owner/Pi-validated. The documentation-only closeout above that checkpoint is not yet pushed, merged, tagged, or released and still requires supervisor archive review.
+- Ticket 4 runtime/config/test implementation at `ace2a7f` is owner/Pi-validated. This documentation records that result without asserting current branch publication, merge, tag, or release status; determine those states from repository refs and release records.
 - Ticket 5 font specification remains separate and has not started.

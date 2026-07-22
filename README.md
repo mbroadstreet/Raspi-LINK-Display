@@ -123,6 +123,6 @@ MIT License — see [LICENSE](LICENSE) file.
 
 - **P** — cycle named color presets (Ticket 2, accepted integration behavior). Only colors change; layout, fonts, and Link state are unaffected.
 - **R** — reload the original startup visual-config source (Ticket 3, published and Pi-validated). A successful reload reconstructs the configured initial preset (or the first effective preset fallback), rather than persisting a preset reached only with P. A missing/invalid reload is nonfatal and keeps the previous working configuration, fonts, and active preset. Window width/height/fullscreen are not applied live; restart is required.
-- **Screen preset configs** — Ticket 4 files under `config/presets/`, selected through the existing `--config` option. The implementation checkpoint `ace2a7f`—including sparse palettes and left-aligned F1 help information—passed the complete owner-reported Raspberry Pi validation. The documentation-closeout commit remains local and requires supervisor archive review before any push or publication.
+- **Screen preset configs** — Ticket 4 files under `config/presets/`, selected through the existing `--config` option. The implementation checkpoint `ace2a7f`—including sparse palettes and left-aligned F1 help information—passed the complete owner-reported Raspberry Pi validation. This documentation records that result; branch publication, merge, tag, and release status must be determined from repository refs and release records.
 
 Details: `docs/RUNTIME-CONFIG.md`, `docs/SCREEN-PRESETS.md`, `docs/TEST-PLAN.md`.

@@ -60,4 +60,4 @@ The supplied files omit `font_path`. The application may discover an installed s
 
 ## Validation and closeout status
 
-The owner reports that the complete targeted Raspberry Pi validation passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`, including no-config/file-default/high-contrast behavior, P/R behavior, invalid-R rollback, F1 alignment, fullscreen/windowed and cursor behavior, and 320×240 rendering. This documentation-only closeout does not rerun those tests; it remains local and requires supervisor archive review, and it does not claim a push, merge, tag, or final v0.6 release.
+The owner reports that the complete targeted Raspberry Pi validation passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`, including no-config/file-default/high-contrast behavior, P/R behavior, invalid-R rollback, F1 alignment, fullscreen/windowed and cursor behavior, and 320×240 rendering. This documentation-only closeout records inherited validation results and does not represent a new runtime or Raspberry Pi test run. Branch publication, merge, tag, and release status must be determined from repository refs and release records.

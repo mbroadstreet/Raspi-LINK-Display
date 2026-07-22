@@ -6,7 +6,7 @@ Status (v0.6 path):
 
 - **Color presets / P key (Ticket 2):** implemented and merged on the accepted integration baseline.
 - **Runtime config reload / R key (Ticket 3):** published, technically complete, and owner/Pi-validated at accepted commit `334116f`.
-- **Screen preset configs / F1 alignment (Ticket 4):** the runtime/config/test implementation at `ace2a7f` on `v0.6-screen-preset-configs` passed the complete owner-reported Raspberry Pi validation. The documentation-only closeout above that checkpoint remains unpushed and requires supervisor archive review. Do not confuse launch-time screen-file selection with R reload.
+- **Screen preset configs / F1 alignment (Ticket 4):** the runtime/config/test implementation at `ace2a7f` on `v0.6-screen-preset-configs` passed the complete owner-reported Raspberry Pi validation. This documentation records that result; branch publication, merge, tag, and release status must be determined from repository refs and release records. Do not confuse launch-time screen-file selection with R reload.
 
 ## Conceptual Hierarchy
 
@@ -159,8 +159,8 @@ active_color_preset=...
 
 1. Ticket 2 color presets / P — done on accepted integration baseline.
 2. Ticket 3 runtime config reload / R — published, technically complete, and Pi-validated at `334116f`.
-3. Ticket 4 screen configs and left-aligned F1 information — implementation checkpoint `ace2a7f` passed complete owner/Pi validation; its local documentation closeout requires supervisor archive review.
+3. Ticket 4 screen configs and left-aligned F1 information — implementation checkpoint `ace2a7f` passed complete owner/Pi validation. Determine publication, merge, tag, and release status from repository refs and release records.
 
 ## Status
 
-Ticket 3's Pi-validation statement is inherited from its accepted checkpoint. The owner reports that the complete targeted Raspberry Pi matrix passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`; this documentation-only turn does not rerun those tests. The new documentation closeout is not yet pushed, merged, tagged, or released and requires supervisor archive review before a normal push can be authorized. See ROADMAP and TEST-PLAN.
+Ticket 3's Pi-validation statement is inherited from its accepted checkpoint. The owner reports that the complete targeted Raspberry Pi matrix passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`. This documentation-only closeout records inherited validation results and does not represent a new runtime or Raspberry Pi test run. Branch publication, merge, tag, and release status must be determined from repository refs and release records. See ROADMAP and TEST-PLAN.
