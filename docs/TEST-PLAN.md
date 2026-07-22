@@ -147,7 +147,7 @@ Automated (config_parser_tests / direct g++ of Config.cpp):
 - Existing file overwritten with invalid RGBA or invalid positive integer returns false in-process (no termination); prior Config intact.
 - Invalid preset content (duplicate IDs / undefined listed preset) returns false with full rollback.
 - At least two successful reloads preserve `--windowed`, `--no-gui`, `--width`, `--height`, `--font`, `--tempo`, `--quantum`.
-- P after R changes active preset name to the next preset and wraps to the first.
+- With at least two effective preset IDs, P after R changes the active preset to the next ID and wraps to the first. A one-ID list remains selected; an empty list has no active preset and P remains a no-op.
 - Ticket 2 built-in / empty-disable / base-restore behaviors still hold after reload.
 - Live window width/height/fullscreen remain after reload when candidate differs; safe colors may still apply.
 - `phase_bar_margin` is validated against live width after window deferral.
@@ -162,7 +162,7 @@ Manual Pi GUI matrix completed by the owner for the accepted Ticket 3 checkpoint
 - CLI overrides remain authoritative across repeated R; tempo/quantum do not restart Link.
 - **F then R:** start `--windowed`, press F to fullscreen, press R — window stays fullscreen (no recreate); deferred difference vs startup/`--windowed` may be reported only; F again still returns to windowed. Opposite direction from initial fullscreen when practical.
 
-### Screen Preset Configs, Sparse File Palette, and F1 Alignment — Ticket 4 replacement candidate
+### Screen Preset Configs, Sparse File Palette, and F1 Alignment — Ticket 4 owner/Pi-validated implementation at `ace2a7f`
 
 Automated/source checks:
 
@@ -177,14 +177,14 @@ Automated/source checks:
 - Run direct `g++` parser tests, clean CMake build, CMake parser tests, inspection commands, and no-config/example/all-screen `--print-config` checks where tools are available.
 - Verify the four config files contain exactly six active file-palette colors; screen files have no active `color_presets=`, dot definitions, `tempo`, `quantum`, or `font_path`. Only the high-contrast screen file may actively select `color_preset=high_contrast`.
 
-Required Raspberry Pi GUI matrix before Ticket 4 acceptance:
+Owner-reported Raspberry Pi GUI matrix completed successfully at `ace2a7f` and retained here as a regression checklist. This documentation-only closeout does not rerun the matrix:
 
 - No-config startup retains the dim compiled palette.
 - The example and both default-start screen files use the six-color file palette.
 - The high-contrast file starts with unchanged built-in high contrast; P to default reveals the file palette; P wraps in all files.
-- R preserves every effective layout/font/phase/preset/color value; invalid R retains the prior working state.
+- Successful R reconstructs the startup configuration: it selects a valid explicit `color_preset=<id>`, otherwise the first effective preset (`default` for unchanged built-ins), or no active preset when `color_presets=` is empty. A mid-session P selection is not persisted. The explicit high-contrast file returns to `high_contrast`; failed R retains the complete prior working state, including the active preset.
 - Launch all three files in fullscreen; also launch `320x240-landscape.conf` with `--windowed` and confirm actual 320×240 dimensions.
 - Reconfirm F1 title, keys, and actions remain left-aligned, use distinct columns, and are readable/unclipped at 480×320 and 320×240.
 - Reconfirm F toggle/cursor behavior, centered tempo, phase rendering, Link state, and window creation are unchanged; P/R do not restart Link or recreate the SDL window.
 
-The first Ticket 4 candidate passed owner Pi checks, but this sparse-palette replacement remains unaccepted until replacement-archive review and targeted Pi validation pass. See `docs/SCREEN-PRESETS.md` and `docs/RUNTIME-CONFIG.md`.
+The owner reports that the complete targeted Ticket 4 matrix above passed for `ace2a7f`. The parser suite also previously passed under WSL with `-Wall -Wextra -Wpedantic`; its only warning was the pre-existing unused `strictStod()` warning in protected code. Neither the Pi matrix nor runtime build/tests are rerun or reinterpreted by this documentation-only closeout. The new documentation commit remains unpushed and requires supervisor archive review before publication. See `docs/SCREEN-PRESETS.md` and `docs/RUNTIME-CONFIG.md`.

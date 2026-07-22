@@ -52,7 +52,7 @@ The older keys `background_color` and `band_color` are supported only as depreca
 - Press **F1** in GUI mode to show a brief help overlay.
 - The overlay auto-dismisses after the configured number of seconds (`help_overlay_seconds`, default 8).
 - Overlay uses actual renderer output size for positioning.
-- Ticket 4 candidate placement keeps the panel centered while left-aligning the title, key column, and action column. Keys and actions are rendered separately rather than aligned with embedded spaces:
+- Ticket 4 placement keeps the panel centered while left-aligning the title, key column, and action column. Keys and actions are rendered separately rather than aligned with embedded spaces:
   ```
   F1 Help
   Q / Esc    Quit
@@ -61,7 +61,7 @@ The older keys `background_color` and `band_color` are supported only as depreca
   R          Reload config
   ```
 - Row order, configured colors, alpha blending, timeout, and approximate panel size are preserved.
-- The candidate targets readable, unclipped output at both 480×320 and 320×240 in fullscreen and windowed modes; Pi GUI validation remains required.
+- The owner-reported Pi validation at implementation checkpoint `ace2a7f` confirmed readable, unclipped output at both 480×320 and 320×240 in fullscreen and windowed modes.
 
 ## Configuration
 
@@ -77,7 +77,7 @@ See `config/link-pi-display.example.conf` for the full list of supported keys.
 
 CLI options override config-file values.
 
-## Supplied screen configurations (Ticket 4 candidate)
+## Supplied screen configurations (Ticket 4)
 
 - `config/presets/480x320-landscape.conf` — 480×320 fullscreen, starts with `default` colors.
 - `config/presets/480x320-high-contrast.conf` — 480×320 fullscreen, starts with `high_contrast` colors.
@@ -95,7 +95,7 @@ These are ordinary launch-time `--config` files. Selecting another screen config
 ## Runtime visual controls (v0.6)
 
 - `P` cycles named color presets and changes colors only.
-- `R` reloads the original startup config path transactionally; window size/fullscreen remain launch-time settings and Link/window creation are unchanged.
+- `R` reloads the original startup config path transactionally; successful reload reconstructs the configured initial preset or first effective fallback rather than persisting a P-only selection, while failed reload retains the prior active preset. Window size/fullscreen remain launch-time settings and Link/window creation are unchanged.
 - `F` continues to toggle the live fullscreen state.
 
-Ticket 3 P/R behavior is accepted and Pi-validated. Ticket 4 screen-file and F1-placement changes remain candidate work pending automated Linux/Pi and visual acceptance. See `docs/RUNTIME-CONFIG.md`.
+Ticket 3 P/R behavior is accepted and Pi-validated. The owner reports that Ticket 4 runtime/config/test implementation checkpoint `ace2a7f` passed the complete targeted Raspberry Pi matrix. This documentation-only closeout remains unpushed, requires supervisor archive review, and does not rerun runtime or Pi tests. See `docs/RUNTIME-CONFIG.md`.

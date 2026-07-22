@@ -6,7 +6,7 @@ Status (v0.6 path):
 
 - **Color presets / P key (Ticket 2):** implemented and merged on the accepted integration baseline.
 - **Runtime config reload / R key (Ticket 3):** published, technically complete, and owner/Pi-validated at accepted commit `334116f`.
-- **Screen preset configs / F1 alignment (Ticket 4):** unaccepted replacement-candidate work on `v0.6-screen-preset-configs`. The first candidate passed owner Pi checks; the sparse-palette follow-up still requires replacement-archive review and targeted Pi revalidation. Do not confuse launch-time screen-file selection with R reload.
+- **Screen preset configs / F1 alignment (Ticket 4):** the runtime/config/test implementation at `ace2a7f` on `v0.6-screen-preset-configs` passed the complete owner-reported Raspberry Pi validation. The documentation-only closeout above that checkpoint remains unpushed and requires supervisor archive review. Do not confuse launch-time screen-file selection with R reload.
 
 ## Conceptual Hierarchy
 
@@ -26,7 +26,7 @@ Pressing `R` in GUI mode reloads the configuration source while the application 
 - Explicit startup `--config PATH`: every R reloads that same PATH.
 - Auto-discovered `config/link-pi-display.conf` loaded at startup: every R reloads that same discovered path.
 - No config file loaded at startup: R rebuilds built-in defaults and re-applies original CLI overrides. It does not discover a new file later.
-- Reload never writes a config file.
+- Reload never writes a config file. A preset reached only with P is runtime state and is not written to the file or persisted elsewhere.
 
 ### Behavior
 
@@ -34,8 +34,15 @@ Pressing `R` in GUI mode reloads the configuration source while the application 
 - Re-apply original CLI overrides on every successful reload (including repeated reloads):
   `--windowed`, `--no-gui`, `--width`, `--height`, `--font`, `--tempo`, `--quantum`.
 - Skip `--config` as a visual override while retaining `startupConfigPath` as the reload source.
-- On success, apply safe live visual updates (colors, preset definitions/order/initial, phase-bar layout values that remain usable on the live window, help-overlay settings, hide-cursor preference, and successfully reopened fonts). Successful R resets the active preset from the file’s `color_preset=<id>` (or first listed / built-in default rules), not from an in-session P position that is not the file start preset.
-- On failure (missing/invalid/unparsable/unusable layout/font open failure): keep the complete previous working Config and fonts; print a nonfatal diagnostic; leave the app running.
+- On success, apply safe live visual updates (colors, preset definitions/order/initial, phase-bar layout values that remain usable on the live window, help-overlay settings, hide-cursor preference, and successfully reopened fonts).
+- A successful R reconstructs preset selection using these rules:
+  1. Select a valid explicit `color_preset=<id>` from the effective configuration when one is configured.
+  2. Otherwise, select the first ID in the effective preset list when that list is non-empty.
+  3. With unchanged built-ins, the fallback is `default` because the list order is `default,high_contrast`.
+  4. If `color_presets=` is empty, there is no active preset and P is a no-op.
+- A mid-session selection reached only with P is not preserved by a successful R. For example, starting at built-in `default`, pressing P to reach `high_contrast`, and then successfully pressing R returns to `default` unless the startup configuration explicitly selects another valid initial ID.
+- `config/presets/480x320-high-contrast.conf` explicitly selects `color_preset=high_contrast`, so its successful R returns to `high_contrast`, not `default`.
+- On failure (missing/invalid/unparsable/unusable layout/font open failure): transactionally keep the complete previous working Config, fonts, and active preset; print a nonfatal diagnostic; leave the app running.
 
 ### Strict startup is preserved
 
@@ -73,21 +80,21 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 
 - Only colors change.
 - Fonts, layout dimensions, and window mode are not affected by P.
-- No configuration files are written.
+- No configuration files are written, and a runtime preset selection reached with P is not persisted elsewhere.
 - Built-ins: `default` (label-only base restore) and `high_contrast`.
 - File `color_presets=` list replaces built-ins; omitted list keeps built-ins; empty list disables presets (P no-op).
-- P continues to work after a successful R.
+- With at least two effective preset IDs, P continues to cycle after a successful R. A one-ID list remains on that preset, while an empty list has no active preset; P cannot advance either case.
 
 ### Base / Default Colors vs presets
 
 - **Compiled defaults** are always the first layer. Starting with no config keeps the diagnostic dim palette: inactive `40,44,48,255`; no-peers `40,44,48,255`; connected `75,85,95,255`; tempo `64,79,96,255`; phase bar `83,114,151,255`; marker `255,255,255,255`.
 - **Sparse file overrides** replace only keys actively assigned by the selected file. The main example and supplied screen files override the same six colors with inactive `100,44,48,255`; no-peers `40,54,88,255`; connected `105,105,95,255`; tempo `84,89,166,255`; phase bar `73,164,121,255`; marker `125,205,25,255`.
-- **Base / Default Colors** are the effective top-level colors after compiled defaults and sparse file overrides. Commented or omitted keys inherit compiled values; uncommenting a key creates an override. `--print-config` displays the final effective configuration.
+- **Base / Default Colors** are captured from the effective top-level colors after compiled defaults, sparse file overrides, original CLI replay, and supported alias resolution, but before applying the selected initial preset. Current CLI options do not directly set colors. Commented or omitted file keys inherit compiled values; uncommenting a key creates an override. `--print-config` displays the final effective configuration.
 - A **label-only** preset (for example `color_preset.default.name=Default` with **no** `color_preset.default.*_color` keys) does not force color overrides. Activating it restores the captured base colors.
 - A **partial** preset may define only some `color_preset.<id>.*_color` keys. Unspecified colors **inherit from the base layer**, not from the previously active preset.
 - Repeating every base color under `color_preset.default.*` is redundant when `default` is intended as base restore; keep `.name` only unless you deliberately want `default` to force overrides.
 
-The effective order is: compiled defaults → sparse top-level file overrides → active color-preset overrides → command-line overrides for settings with CLI options. R rebuilds that same order and then reapplies the original CLI.
+The construction order at startup and during a successful R is: compiled defaults and built-in presets → sparse config-file overrides → original CLI overrides/replay and supported alias resolution → capture effective top-level base colors → select and apply a valid configured initial preset, or the first effective preset fallback. Current CLI options do not directly set colors, but CLI processing still occurs before base-color capture and initial-preset application. Existing live/deferred window semantics remain unchanged.
 
 ### File-defined preset list behavior
 
@@ -97,7 +104,7 @@ The effective order is: compiled defaults → sparse top-level file overrides �
 | Omitted entirely | Built-in presets remain available |
 | Present but empty (`color_presets=`) | Presets disabled; P is a no-op |
 
-`color_preset=<id>` selects the initial active preset at startup and after a **successful R** (reload re-applies the file’s initial `color_preset` and does not keep a mid-session P selection unless that id is still the file’s start preset).
+`color_preset=<id>` selects the initial active preset at startup and after a **successful R** when the ID is valid. Without an explicit initial ID, startup and successful R select the first effective preset; with an empty effective list there is no active preset. A failed R instead retains the complete prior working state, including its active preset.
 
 ### Config syntax
 
@@ -117,7 +124,7 @@ An active `color_presets=` replaces the built-in list and requires a definition 
 
 ## Help Overlay
 
-The Ticket 4 candidate keeps the panel centered but left-aligns the title and renders keys/actions as separate left-aligned columns:
+The Ticket 4 implementation keeps the panel centered but left-aligns the title and renders keys/actions as separate left-aligned columns:
 
 ```
 F1 Help
@@ -127,11 +134,11 @@ P          Color preset
 R          Reload config
 ```
 
-The spacing above is illustrative only; the renderer does not align columns with embedded spaces. Existing controls, overlay timeout, colors, and alpha blending remain unchanged. Pi GUI checks at 480×320 and 320×240 are still required.
+The spacing above is illustrative only; the renderer does not align columns with embedded spaces. Existing controls, overlay timeout, colors, and alpha blending remain unchanged. The complete owner-reported Pi validation at `ace2a7f` included readable, unclipped 480×320 and 320×240 output.
 
 ## Ticket 4 standalone screen configurations
 
-The candidate adds three normal config files selected with the existing `--config` option:
+The Pi-validated Ticket 4 implementation adds three normal config files selected with the existing `--config` option:
 
 - `config/presets/480x320-landscape.conf`
 - `config/presets/480x320-high-contrast.conf`
@@ -152,8 +159,8 @@ active_color_preset=...
 
 1. Ticket 2 color presets / P — done on accepted integration baseline.
 2. Ticket 3 runtime config reload / R — published, technically complete, and Pi-validated at `334116f`.
-3. Ticket 4 screen configs/docs and left-aligned F1 information — current unaccepted replacement candidate; archive review and targeted Pi validation pending.
+3. Ticket 4 screen configs and left-aligned F1 information — implementation checkpoint `ace2a7f` passed complete owner/Pi validation; its local documentation closeout requires supervisor archive review.
 
 ## Status
 
-Ticket 3's Pi-validation statement is inherited from the accepted checkpoint. The first Ticket 4 candidate's owner Pi results do not accept this sparse-palette replacement. Ticket 4 is not yet accepted, merged, pushed, tagged, fully tested, or released. See ROADMAP and TEST-PLAN for its remaining gates.
+Ticket 3's Pi-validation statement is inherited from its accepted checkpoint. The owner reports that the complete targeted Raspberry Pi matrix passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`; this documentation-only turn does not rerun those tests. The new documentation closeout is not yet pushed, merged, tagged, or released and requires supervisor archive review before a normal push can be authorized. See ROADMAP and TEST-PLAN.

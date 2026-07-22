@@ -46,9 +46,11 @@ The high-contrast launch file carries the same six base overrides before selecti
 ## Runtime controls and precedence
 
 - **P** cycles the inherited built-in `default` and `high_contrast` presets and wraps in built-in order. Label-only `default` restores the selected file's six-color base palette.
-- **R** reloads the same startup config path and rebuilds compiled defaults → sparse file overrides → initial preset → original CLI overrides. Complete profile state must remain identical after an unchanged-file reload.
+- **R** reloads the same startup config path and reconstructs compiled defaults and built-in presets → sparse file overrides → original CLI overrides/replay and supported alias resolution → captured effective top-level base colors → configured initial preset, or the first effective preset fallback.
 - Command-line options override file values at startup and remain authoritative across R reloads.
 - To select another screen configuration or apply changed `width`, `height`, or `fullscreen`, restart with the desired `--config` path.
+
+A successful R does not preserve a mid-session preset reached only with P, because that runtime selection is not written to the config file or persisted elsewhere. For the implicit-default files, default → P to high contrast → successful R returns to built-in `default`, the first effective preset. The high-contrast launch file explicitly sets `color_preset=high_contrast`, so its successful R returns to `high_contrast`, not `default`. If `color_presets=` is empty, no preset is active and P is a no-op. A failed R remains transactional and retains the complete previous working configuration, including the active preset.
 
 An active `color_presets=` in a custom file replaces the built-in list and requires a definition for every listed ID. Omitting it, as these files do, retains the built-ins.
 
@@ -56,6 +58,6 @@ An active `color_presets=` in a custom file replaces the built-in list and requi
 
 The supplied files omit `font_path`. The application may discover an installed system font, or the operator may provide a host-specific path with `--font PATH`. Font specification work is reserved for Ticket 5; no font feature is part of this follow-up.
 
-## Candidate status
+## Validation and closeout status
 
-This sparse-palette follow-up is an unaccepted Ticket 4 replacement candidate. The first candidate passed owner Pi checks, but replacement-archive review and targeted Pi validation of no-config/file-default/high-contrast/P/R behavior remain required. This document does not claim a merge, push, tag, final v0.6 release, or Ticket 4 acceptance.
+The owner reports that the complete targeted Raspberry Pi validation passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`, including no-config/file-default/high-contrast behavior, P/R behavior, invalid-R rollback, F1 alignment, fullscreen/windowed and cursor behavior, and 320×240 rendering. This documentation-only closeout does not rerun those tests; it remains local and requires supervisor archive review, and it does not claim a push, merge, tag, or final v0.6 release.
