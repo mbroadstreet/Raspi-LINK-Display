@@ -6,12 +6,12 @@ Status (v0.6 path):
 
 - **Color presets / P key (Ticket 2):** implemented and merged on the accepted integration baseline.
 - **Runtime config reload / R key (Ticket 3):** published, technically complete, and owner/Pi-validated at accepted commit `334116f`.
-- **Screen preset configs / F1 alignment (Ticket 4):** candidate work on `v0.6-screen-preset-configs`; automated Linux/Pi and GUI acceptance remain pending. Do not confuse launch-time screen-file selection with R reload.
+- **Screen preset configs / F1 alignment (Ticket 4):** unaccepted replacement-candidate work on `v0.6-screen-preset-configs`. The first candidate passed owner Pi checks; the sparse-palette follow-up still requires replacement-archive review and targeted Pi revalidation. Do not confuse launch-time screen-file selection with R reload.
 
 ## Conceptual Hierarchy
 
-- **Screen preset** — A complete configuration file selected at launch time (Ticket 4). It can define window size, fonts, phase bar dimensions, band colors, and one or more color presets.
-- **Color preset** — A named collection of color values defined *inside* a config file. A color preset overrides only color-related settings. Cycled with **P**.
+- **Screen preset** — An ordinary sparse configuration file selected at launch time (Ticket 4). It explicitly defines its screen contract and file-only palette while inheriting unrelated compiled defaults and built-in color presets.
+- **Color preset** — A built-in or file-defined named collection of color values. A color preset overrides only color-related settings. Cycled with **P**.
 - **R key** — Reloads the original startup config source at runtime (visual settings).
 - **P key** — Cycles through named color presets in the currently loaded configuration.
 
@@ -80,10 +80,14 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 
 ### Base / Default Colors vs presets
 
-- **Base / Default Colors** are the top-level color keys in the config (or built-in defaults when no file supplies them). They are the required base layer for normal appearance.
+- **Compiled defaults** are always the first layer. Starting with no config keeps the diagnostic dim palette: inactive `40,44,48,255`; no-peers `40,44,48,255`; connected `75,85,95,255`; tempo `64,79,96,255`; phase bar `83,114,151,255`; marker `255,255,255,255`.
+- **Sparse file overrides** replace only keys actively assigned by the selected file. The main example and supplied screen files override the same six colors with inactive `100,44,48,255`; no-peers `40,54,88,255`; connected `105,105,95,255`; tempo `84,89,166,255`; phase bar `73,164,121,255`; marker `125,205,25,255`.
+- **Base / Default Colors** are the effective top-level colors after compiled defaults and sparse file overrides. Commented or omitted keys inherit compiled values; uncommenting a key creates an override. `--print-config` displays the final effective configuration.
 - A **label-only** preset (for example `color_preset.default.name=Default` with **no** `color_preset.default.*_color` keys) does not force color overrides. Activating it restores the captured base colors.
 - A **partial** preset may define only some `color_preset.<id>.*_color` keys. Unspecified colors **inherit from the base layer**, not from the previously active preset.
 - Repeating every base color under `color_preset.default.*` is redundant when `default` is intended as base restore; keep `.name` only unless you deliberately want `default` to force overrides.
+
+The effective order is: compiled defaults → sparse top-level file overrides → active color-preset overrides → command-line overrides for settings with CLI options. R rebuilds that same order and then reapplies the original CLI.
 
 ### File-defined preset list behavior
 
@@ -98,21 +102,18 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 ### Config syntax
 
 ```ini
-# Base / Default color
-tempo_color=64,79,96,255
+# Sparse file-only base override
+tempo_color=84,89,166,255
 
-color_presets=default,high_contrast
-color_preset=default
+# Omit color_presets= to retain built-in default,high_contrast.
+# Select a built-in initial preset only when needed:
+# color_preset=high_contrast
 
-# Label-only default: restores Base / Default Colors
-color_preset.default.name=Default
-
-# Alternate preset overrides only what differs
-color_preset.high_contrast.name=High Contrast
-color_preset.high_contrast.tempo_color=255,255,255,255
+# Optional built-in customization:
+# color_preset.high_contrast.tempo_color=255,240,0,255
 ```
 
-See `config/link-pi-display.example.conf` for a Pi-terminal-oriented layout: short R/P guidance and Base colors near the top, `high_contrast` overrides later.
+An active `color_presets=` replaces the built-in list and requires a definition for every listed ID. See `config/link-pi-display.example.conf` for commented replacement syntax and compiled-default references.
 
 ## Help Overlay
 
@@ -136,7 +137,7 @@ The candidate adds three normal config files selected with the existing `--confi
 - `config/presets/480x320-high-contrast.conf`
 - `config/presets/320x240-landscape.conf`
 
-They contain layout and color-preset values but omit `tempo`, `quantum`, and machine-specific `font_path`. P cycles colors; R reloads the same startup path; CLI overrides remain authoritative. Selecting another screen file or applying window dimensions requires restart. See `docs/SCREEN-PRESETS.md`.
+They keep explicit screen-contract values (window size/mode, four font sizes, and phase geometry), apply the six-color file palette, and inherit unrelated defaults plus the built-in preset list/labels/high-contrast overrides. They omit `tempo`, `quantum`, and machine-specific `font_path`. Only the high-contrast launch file actively selects `color_preset=high_contrast`. P cycles colors; R reloads the same startup path; CLI overrides remain authoritative. Selecting another screen file or applying window dimensions requires restart. See `docs/SCREEN-PRESETS.md`.
 
 ## `--print-config`
 
@@ -151,8 +152,8 @@ active_color_preset=...
 
 1. Ticket 2 color presets / P — done on accepted integration baseline.
 2. Ticket 3 runtime config reload / R — published, technically complete, and Pi-validated at `334116f`.
-3. Ticket 4 screen configs/docs and left-aligned F1 information — current candidate; acceptance pending.
+3. Ticket 4 screen configs/docs and left-aligned F1 information — current unaccepted replacement candidate; archive review and targeted Pi validation pending.
 
 ## Status
 
-Ticket 3's Pi-validation statement is inherited from the accepted checkpoint. Ticket 4 is not yet accepted, merged, pushed, tagged, fully tested, or released. See ROADMAP and TEST-PLAN for its remaining gates.
+Ticket 3's Pi-validation statement is inherited from the accepted checkpoint. The first Ticket 4 candidate's owner Pi results do not accept this sparse-palette replacement. Ticket 4 is not yet accepted, merged, pushed, tagged, fully tested, or released. See ROADMAP and TEST-PLAN for its remaining gates.

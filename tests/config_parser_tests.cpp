@@ -55,43 +55,29 @@ static void testScreenPreset(const std::string& testName,
 {
     Config c = parse_for_test({"test", "--config", path});
 
-    expect(testName + "_layout",
-           c.width == width && c.height == height && c.fullscreen);
-    expect(testName + "_font_sizes",
-           c.statusFontSize == statusFontSize
-           && c.tempoFontSize == tempoFontSize
-           && c.bottomFontSize == bottomFontSize
-           && c.helpFontSize == helpFontSize);
-    expect(testName + "_phase_layout",
-           c.phaseBarHeight == phaseBarHeight
-           && c.phaseBarSegmentGap == phaseBarGap
-           && c.phaseBarMargin == phaseBarMargin);
-    expect(testName + "_runtime_defaults",
-           c.helpOverlaySeconds == 8 && c.hideMouseCursor
-           && c.initialTempo == 120.0 && c.quantum == 4.0);
-    expect(testName + "_preset_order",
-           c.colorPresetNames.size() == 2
-           && c.colorPresetNames[0] == "default"
-           && c.colorPresetNames[1] == "high_contrast");
-    expect(testName + "_labels_and_label_only_default",
-           c.colorPresetLabels["default"] == "Default"
-           && c.colorPresetLabels["high_contrast"] == "High Contrast"
-           && c.colorPresetOverrides.count("default") == 0);
-    expect(testName + "_startup_path",
-           c.startupConfigPath == path && c.configPath == path);
-    expect(testName + "_initial_preset",
-           getActiveColorPresetName(c) == initialPreset);
-
-    const auto baseColorsAreExact = [&]() {
-        return rgbaEquals(c.topBandColor, 0, 0, 0, 255)
+    const auto fileBaseSnapshotIsExact = [&]() {
+        return rgbaEquals(c.baseStatusInactiveColor, 100, 44, 48, 255)
+            && rgbaEquals(c.baseStatusNoPeersColor, 40, 54, 88, 255)
+            && rgbaEquals(c.baseStatusConnectedColor, 105, 105, 95, 255)
+            && rgbaEquals(c.baseTempoColor, 84, 89, 166, 255)
+            && rgbaEquals(c.basePhaseBarColor, 73, 164, 121, 255)
+            && rgbaEquals(c.basePhaseMarkerColor, 125, 205, 25, 255)
+            && rgbaEquals(c.baseTopBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.baseCenterBandColor, 18, 18, 18, 255)
+            && rgbaEquals(c.baseBottomBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.baseHelpOverlayBackgroundColor, 0, 0, 0, 220)
+            && rgbaEquals(c.baseHelpOverlayTextColor, 210, 210, 210, 255);
+    };
+    const auto fileDefaultColorsAreExact = [&]() {
+        return rgbaEquals(c.statusInactiveColor, 100, 44, 48, 255)
+            && rgbaEquals(c.statusNoPeersColor, 40, 54, 88, 255)
+            && rgbaEquals(c.statusConnectedColor, 105, 105, 95, 255)
+            && rgbaEquals(c.tempoColor, 84, 89, 166, 255)
+            && rgbaEquals(c.phaseBarColor, 73, 164, 121, 255)
+            && rgbaEquals(c.phaseMarkerColor, 125, 205, 25, 255)
+            && rgbaEquals(c.topBandColor, 0, 0, 0, 255)
             && rgbaEquals(c.centerBandColor, 18, 18, 18, 255)
             && rgbaEquals(c.bottomBandColor, 0, 0, 0, 255)
-            && rgbaEquals(c.statusInactiveColor, 40, 44, 48, 255)
-            && rgbaEquals(c.statusNoPeersColor, 40, 44, 48, 255)
-            && rgbaEquals(c.statusConnectedColor, 75, 85, 95, 255)
-            && rgbaEquals(c.tempoColor, 64, 79, 96, 255)
-            && rgbaEquals(c.phaseBarColor, 83, 114, 151, 255)
-            && rgbaEquals(c.phaseMarkerColor, 255, 255, 255, 255)
             && rgbaEquals(c.helpOverlayBackgroundColor, 0, 0, 0, 220)
             && rgbaEquals(c.helpOverlayTextColor, 210, 210, 210, 255);
     };
@@ -108,36 +94,66 @@ static void testScreenPreset(const std::string& testName,
             && rgbaEquals(c.helpOverlayBackgroundColor, 0, 0, 0, 230)
             && rgbaEquals(c.helpOverlayTextColor, 255, 255, 255, 255);
     };
+    const auto expectCompleteProfileState = [&](const std::string& phase) {
+        expect(testName + "_" + phase + "_layout",
+               c.width == width && c.height == height && c.fullscreen);
+        expect(testName + "_" + phase + "_font_sizes",
+               c.statusFontSize == statusFontSize
+               && c.tempoFontSize == tempoFontSize
+               && c.bottomFontSize == bottomFontSize
+               && c.helpFontSize == helpFontSize);
+        expect(testName + "_" + phase + "_phase_layout",
+               c.phaseBarHeight == phaseBarHeight
+               && c.phaseBarSegmentGap == phaseBarGap
+               && c.phaseBarMargin == phaseBarMargin);
+        expect(testName + "_" + phase + "_inherited_runtime_defaults",
+               c.helpOverlaySeconds == 8 && c.hideMouseCursor
+               && c.initialTempo == 120.0 && c.quantum == 4.0);
+        expect(testName + "_" + phase + "_builtin_preset_order",
+               c.colorPresetNames.size() == 2
+               && c.colorPresetNames[0] == "default"
+               && c.colorPresetNames[1] == "high_contrast");
+        expect(testName + "_" + phase + "_builtin_labels_and_label_only_default",
+               c.colorPresetLabels.count("default") == 1
+               && c.colorPresetLabels.at("default") == "Default"
+               && c.colorPresetLabels.count("high_contrast") == 1
+               && c.colorPresetLabels.at("high_contrast") == "High Contrast"
+               && c.colorPresetOverrides.count("default") == 0);
+        expect(testName + "_" + phase + "_startup_and_config_paths",
+               c.startupConfigPath == path && c.configPath == path);
+        expect(testName + "_" + phase + "_active_preset",
+               getActiveColorPresetName(c) == initialPreset);
+        expect(testName + "_" + phase + "_file_base_snapshot",
+               fileBaseSnapshotIsExact());
+        if (initialPreset == "default")
+            expect(testName + "_" + phase + "_file_default_palette",
+                   fileDefaultColorsAreExact());
+        else
+            expect(testName + "_" + phase + "_high_contrast_palette",
+                   highContrastColorsAreExact());
+    };
 
-    if (initialPreset == "default")
-        expect(testName + "_initial_base_colors", baseColorsAreExact());
-    else
-        expect(testName + "_initial_high_contrast_colors", highContrastColorsAreExact());
+    expectCompleteProfileState("initial");
 
     const bool reloadOk = tryReloadConfig(c);
-    const bool reloadColorsAreExact = initialPreset == "default"
-        ? baseColorsAreExact()
-        : highContrastColorsAreExact();
-    expect(testName + "_unchanged_reload",
-           reloadOk && c.startupConfigPath == path && c.configPath == path
-           && getActiveColorPresetName(c) == initialPreset
-           && reloadColorsAreExact);
+    expect(testName + "_unchanged_reload_succeeds", reloadOk);
+    expectCompleteProfileState("after_reload");
 
     cycleColorPreset(c);
     if (initialPreset == "default")
     {
-        expect(testName + "_p_to_high_contrast",
+        expect(testName + "_p_high_contrast_palette",
                getActiveColorPresetName(c) == "high_contrast" && highContrastColorsAreExact());
         cycleColorPreset(c);
-        expect(testName + "_p_wrap_restores_base",
-               getActiveColorPresetName(c) == "default" && baseColorsAreExact());
+        expect(testName + "_p_wrap_restored_file_default_palette",
+               getActiveColorPresetName(c) == "default" && fileDefaultColorsAreExact());
     }
     else
     {
-        expect(testName + "_p_to_default_restores_base",
-               getActiveColorPresetName(c) == "default" && baseColorsAreExact());
+        expect(testName + "_p_restored_file_default_palette",
+               getActiveColorPresetName(c) == "default" && fileDefaultColorsAreExact());
         cycleColorPreset(c);
-        expect(testName + "_p_wraps_high_contrast",
+        expect(testName + "_p_wrap_high_contrast_palette",
                getActiveColorPresetName(c) == "high_contrast" && highContrastColorsAreExact());
     }
 }
@@ -179,6 +195,18 @@ int main(int argc, char** argv)
         expect("default_config_fullscreen", c.fullscreen == true);
         expect("default_config_tempo", c.initialTempo == 120.0);
         expect("default_config_center_band", c.centerBandColor.r == 18 && c.centerBandColor.g == 18 && c.centerBandColor.b == 18);
+        expect("no_config_compiled_dim_status_inactive",
+               rgbaEquals(c.statusInactiveColor, 40, 44, 48, 255));
+        expect("no_config_compiled_dim_status_no_peers",
+               rgbaEquals(c.statusNoPeersColor, 40, 44, 48, 255));
+        expect("no_config_compiled_dim_status_connected",
+               rgbaEquals(c.statusConnectedColor, 75, 85, 95, 255));
+        expect("no_config_compiled_dim_tempo",
+               rgbaEquals(c.tempoColor, 64, 79, 96, 255));
+        expect("no_config_compiled_dim_phase_bar",
+               rgbaEquals(c.phaseBarColor, 83, 114, 151, 255));
+        expect("no_config_compiled_dim_phase_marker",
+               rgbaEquals(c.phaseMarkerColor, 255, 255, 255, 255));
     }
 
     {
@@ -187,7 +215,7 @@ int main(int argc, char** argv)
         expect("example_config_hide_mouse", c.hideMouseCursor == true);
         expect("example_config_top_band", c.topBandColor.r == 0 && c.topBandColor.g == 0 && c.topBandColor.b == 0);
 
-        // UX clarity: example conf parses with label-only default + base colors
+        // Sparse example inherits built-in presets and applies only its six-color file palette.
         expect("example_config_parses_presets_order",
                c.colorPresetNames.size() == 2
                && c.colorPresetNames[0] == "default"
@@ -197,14 +225,20 @@ int main(int argc, char** argv)
                c.colorPresetLabels.count("default") == 1
                && c.colorPresetLabels["default"] == "Default"
                && c.colorPresetOverrides.count("default") == 0);
-        expect("example_config_base_tempo_effective",
-               c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
-        expect("example_config_base_status_connected",
-               c.statusConnectedColor.r == 75 && c.statusConnectedColor.g == 85 && c.statusConnectedColor.b == 95);
+        expect("example_config_file_default_tempo_effective",
+               rgbaEquals(c.tempoColor, 84, 89, 166, 255));
+        expect("example_config_file_default_status_inactive",
+               rgbaEquals(c.statusInactiveColor, 100, 44, 48, 255));
+        expect("example_config_file_default_status_no_peers",
+               rgbaEquals(c.statusNoPeersColor, 40, 54, 88, 255));
+        expect("example_config_file_default_status_connected",
+               rgbaEquals(c.statusConnectedColor, 105, 105, 95, 255));
+        expect("example_config_file_default_phase_bar",
+               rgbaEquals(c.phaseBarColor, 73, 164, 121, 255));
+        expect("example_config_file_default_phase_marker",
+               rgbaEquals(c.phaseMarkerColor, 125, 205, 25, 255));
         expect("example_config_base_center_band",
                c.centerBandColor.r == 18 && c.centerBandColor.g == 18 && c.centerBandColor.b == 18);
-        expect("example_config_base_phase_bar",
-               c.phaseBarColor.r == 83 && c.phaseBarColor.g == 114 && c.phaseBarColor.b == 151);
 
         const int base_tempo_r = c.tempoColor.r;
         const int base_tempo_g = c.tempoColor.g;
@@ -228,7 +262,7 @@ int main(int argc, char** argv)
         expect("example_config_cycle_restores_base_center",
                c.centerBandColor.r == base_center_r);
         expect("example_config_cycle_restores_base_marker",
-               c.phaseMarkerColor.r == base_marker_r && c.phaseMarkerColor.r == 255);
+               c.phaseMarkerColor.r == base_marker_r && c.phaseMarkerColor.r == 125);
     }
 
     testScreenPreset("screen_480x320_landscape",

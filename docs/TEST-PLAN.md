@@ -162,26 +162,29 @@ Manual Pi GUI matrix completed by the owner for the accepted Ticket 3 checkpoint
 - CLI overrides remain authoritative across repeated R; tempo/quantum do not restart Link.
 - **F then R:** start `--windowed`, press F to fullscreen, press R — window stays fullscreen (no recreate); deferred difference vs startup/`--windowed` may be reported only; F again still returns to windowed. Opposite direction from initial fullscreen when practical.
 
-### Screen Preset Configs and F1 Alignment — Ticket 4 candidate
+### Screen Preset Configs, Sparse File Palette, and F1 Alignment — Ticket 4 replacement candidate
 
 Automated/source checks:
 
-- Parse each real file under `config/presets/` from the repository root.
-- Assert exact dimensions, fullscreen state, font sizes, phase height/gap/margin, help timeout, and cursor preference.
-- Assert preset order `default,high_contrast`, expected initial preset, exact base and high-contrast colors, and label-only default definition.
-- Assert P advances and wraps, with default restoring base colors.
-- Assert `startupConfigPath`/`configPath` retain the selected real file and unchanged-file R succeeds.
-- Run direct `g++` parser tests, clean CMake build, CMake parser tests, inspection commands, and `--print-config` for all three files where tools are available.
+- Parse the no-config state and explicitly assert the original dim compiled colors: inactive `40,44,48,255`; no-peers `40,44,48,255`; connected `75,85,95,255`; tempo `64,79,96,255`; phase bar `83,114,151,255`; marker `255,255,255,255`.
+- Parse the sparse main example and each real screen file from the repository root. Assert that the file-loaded default palette is inactive `100,44,48,255`; no-peers `40,54,88,255`; connected `105,105,95,255`; tempo `84,89,166,255`; phase bar `73,164,121,255`; marker `125,205,25,255`.
+- Assert the explicit screen contract: dimensions/fullscreen, all four font sizes, and phase height/gap/margin.
+- Assert inherited help timeout/cursor, unchanged band/help base colors, built-in order `default,high_contrast`, built-in labels, and label-only default semantics.
+- Assert the startup/config paths, expected initial preset, six-color file base snapshot, and effective default or unchanged built-in high-contrast output.
+- After successful unchanged-file R, repeat the complete profile assertions above—not only colors and paths.
+- Assert P advances and wraps: high contrast remains exact, and returning to default restores the six-color file palette.
+- Preserve the valid literal-`\n` fixture under `// config-defined presets still override after reload`.
+- Run direct `g++` parser tests, clean CMake build, CMake parser tests, inspection commands, and no-config/example/all-screen `--print-config` checks where tools are available.
+- Verify the four config files contain exactly six active file-palette colors; screen files have no active `color_presets=`, dot definitions, `tempo`, `quantum`, or `font_path`. Only the high-contrast screen file may actively select `color_preset=high_contrast`.
 
 Required Raspberry Pi GUI matrix before Ticket 4 acceptance:
 
+- No-config startup retains the dim compiled palette.
+- The example and both default-start screen files use the six-color file palette.
+- The high-contrast file starts with unchanged built-in high contrast; P to default reveals the file palette; P wraps in all files.
+- R preserves every effective layout/font/phase/preset/color value; invalid R retains the prior working state.
 - Launch all three files in fullscreen; also launch `320x240-landscape.conf` with `--windowed` and confirm actual 320×240 dimensions.
-- Confirm the high-contrast file starts in high contrast; P cycles and wraps in every file; R reloads the same selected file.
-- Confirm invalid R reload keeps the working display.
-- Confirm F1 title, keys, and actions are left-aligned, use distinct columns, and remain readable/unclipped at 480×320 and 320×240 in fullscreen and windowed modes.
-- Confirm F toggle and cursor behavior remain correct.
-- Confirm status, centered tempo, phase rendering, Link state, and window creation are unchanged; P/R do not restart Link or recreate the SDL window.
+- Reconfirm F1 title, keys, and actions remain left-aligned, use distinct columns, and are readable/unclipped at 480×320 and 320×240.
+- Reconfirm F toggle/cursor behavior, centered tempo, phase rendering, Link state, and window creation are unchanged; P/R do not restart Link or recreate the SDL window.
 
-See `docs/SCREEN-PRESETS.md`. Ticket 4 remains unaccepted until the source/build and Pi GUI gates pass.
-
-See `docs/RUNTIME-CONFIG.md` for implemented R/P semantics versus Ticket 4.
+The first Ticket 4 candidate passed owner Pi checks, but this sparse-palette replacement remains unaccepted until replacement-archive review and targeted Pi validation pass. See `docs/SCREEN-PRESETS.md` and `docs/RUNTIME-CONFIG.md`.
