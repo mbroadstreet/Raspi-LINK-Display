@@ -332,6 +332,46 @@ void SdlRenderer::renderCenteredText(const std::string& text, TTF_Font* font, SD
     SDL_FreeSurface(surface);
 }
 
+void SdlRenderer::renderLeftAlignedText(const std::string& text, TTF_Font* font, SDL_Rect area, SDL_Color color)
+{
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    if (!surface)
+    {
+        std::cerr << "TTF_RenderUTF8_Blended failed: " << TTF_GetError() << "\n";
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer_, surface);
+    if (!texture)
+    {
+        std::cerr << "SDL_CreateTextureFromSurface failed: " << SDL_GetError() << "\n";
+        SDL_FreeSurface(surface);
+        return;
+    }
+
+    SDL_Rect dst {area.x, 0, surface->w, surface->h};
+
+    if (dst.w > area.w)
+    {
+        const double scale = static_cast<double>(area.w) / static_cast<double>(dst.w);
+        dst.w = area.w;
+        dst.h = static_cast<int>(dst.h * scale);
+    }
+
+    if (dst.h > area.h)
+    {
+        const double scale = static_cast<double>(area.h) / static_cast<double>(dst.h);
+        dst.h = area.h;
+        dst.w = static_cast<int>(dst.w * scale);
+    }
+
+    dst.y = area.y + (area.h - dst.h) / 2;
+    SDL_RenderCopy(renderer_, texture, nullptr, &dst);
+
+    SDL_DestroyTexture(texture);
+    SDL_FreeSurface(surface);
+}
+
 void SdlRenderer::render(const LinkDisplayState& state)
 {
     int outputW = 0;
@@ -448,7 +488,7 @@ void SdlRenderer::renderHelpOverlay()
     int outputW = 0, outputH = 0;
     SDL_GetRendererOutputSize(renderer_, &outputW, &outputH);
 
-    const int w = 280;
+    const int w = std::min(280, outputW - 24);
     const int h = 110;
     const int x = (outputW - w) / 2;
     const int y = 20;
@@ -464,10 +504,23 @@ void SdlRenderer::renderHelpOverlay()
     SDL_RenderFillRect(renderer_, &bg);
 
     SDL_Color textColor = toSDL(config_.helpOverlayTextColor);
+    const int padding = 16;
+    const int keyColumnWidth = 72;
+    const int columnGap = 12;
+    const int textWidth = w - (padding * 2);
+    const int actionX = x + padding + keyColumnWidth + columnGap;
+    const int actionWidth = x + w - padding - actionX;
 
-    renderCenteredText("F1 Help", helpFont_, {x, y + 5, w, 22}, textColor);
-    renderCenteredText("Q / Esc  Quit", helpFont_, {x, y + 28, w, 20}, textColor);
-    renderCenteredText("F        Toggle Fullscreen", helpFont_, {x, y + 48, w, 20}, textColor);
-    renderCenteredText("P        Color preset", helpFont_, {x, y + 68, w, 20}, textColor);
-    renderCenteredText("R        Reload config", helpFont_, {x, y + 88, w, 20}, textColor);
+    renderLeftAlignedText("F1 Help", helpFont_, {x + padding, y + 5, textWidth, 22}, textColor);
+
+    const char* keys[] = {"Q / Esc", "F", "P", "R"};
+    const char* actions[] = {"Quit", "Toggle Fullscreen", "Color preset", "Reload config"};
+    for (int row = 0; row < 4; ++row)
+    {
+        const int rowY = y + 28 + (row * 20);
+        renderLeftAlignedText(keys[row], helpFont_,
+                              {x + padding, rowY, keyColumnWidth, 20}, textColor);
+        renderLeftAlignedText(actions[row], helpFont_,
+                              {actionX, rowY, actionWidth, 20}, textColor);
+    }
 }

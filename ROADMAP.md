@@ -45,13 +45,14 @@ This repo must stay independently testable and runnable without the container.
 - This module will not become the container application.
 - Direct addition of external control protocols into this module is discouraged.
 - Runtime behavior changes are out of scope for documentation/hygiene releases.
+
 ## v0.6 Planned Work
 
-Runtime visual configuration features (planned, not yet implemented):
+Runtime visual configuration sequence:
 
-- Color preset parsing and `P` key cycling (`v0.6-color-presets-cycle-key`)
-- Runtime config reload via `R` key with safe visual updates (`v0.6-runtime-config-reload`)
-- Screen preset config examples and documentation (`v0.6-screen-preset-configs`)
+- Color preset parsing and `P` key cycling (`v0.6-color-presets-cycle-key`) — complete.
+- Runtime config reload via `R` key with safe visual updates (`v0.6-runtime-config-reload`) — Ticket 3 published, technically complete, and Pi-validated at `334116f`.
+- Standalone screen configuration files plus left-aligned F1 help (`v0.6-screen-preset-configs`) — Ticket 4 current candidate; build, supervisor, and Pi GUI acceptance pending.
 
 See:
 - `docs/RUNTIME-CONFIG.md`
@@ -60,5 +61,6 @@ See:
 These features are intended to be additive and should not affect launch-time behavior or existing `--print-config` / `--module-info` output beyond planned extensions.
 
 ## v0.6 Status
-- Color presets + P cycle key implemented (Ticket 2).
-- R reload and screen preset files are future (Tickets 3/4).
+- Ticket 2 color presets + P cycle key are complete.
+- Ticket 3 R reload is complete and Pi-validated.
+- Ticket 4 screen configurations and F1 alignment are the current candidate. Do not treat them as accepted, merged, pushed, tagged, or released until the remaining gates pass.

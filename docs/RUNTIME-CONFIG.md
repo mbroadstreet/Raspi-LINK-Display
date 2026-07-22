@@ -5,8 +5,8 @@ This document describes the runtime visual configuration system for Raspi-LINK-D
 Status (v0.6 path):
 
 - **Color presets / P key (Ticket 2):** implemented and merged on the accepted integration baseline.
-- **Runtime config reload / R key (Ticket 3):** implemented on branch `v0.6-runtime-config-reload` with safe transactional semantics described below. Not Pi-validated or accepted until owner/Pi gates pass.
-- **Screen preset configs (Ticket 4):** not implemented; still future work. Do not confuse with R reload.
+- **Runtime config reload / R key (Ticket 3):** published, technically complete, and owner/Pi-validated at accepted commit `334116f`.
+- **Screen preset configs / F1 alignment (Ticket 4):** candidate work on `v0.6-screen-preset-configs`; automated Linux/Pi and GUI acceptance remain pending. Do not confuse launch-time screen-file selection with R reload.
 
 ## Conceptual Hierarchy
 
@@ -17,7 +17,7 @@ Status (v0.6 path):
 
 The design separates launch-time decisions (screen presets / window creation) from runtime adjustments (color preset cycling and config reload).
 
-## R Key — Config Reload (Implemented on Ticket 3 branch)
+## R Key — Config Reload (Ticket 3 accepted and Pi-validated)
 
 Pressing `R` in GUI mode reloads the configuration source while the application is running.
 
@@ -116,14 +116,27 @@ See `config/link-pi-display.example.conf` for a Pi-terminal-oriented layout: sho
 
 ## Help Overlay
 
-Help includes:
+The Ticket 4 candidate keeps the panel centered but left-aligns the title and renders keys/actions as separate left-aligned columns:
 
 ```
-R Reload config
-P Color preset
+F1 Help
+Q / Esc    Quit
+F          Toggle Fullscreen
+P          Color preset
+R          Reload config
 ```
 
-Existing controls (`F1`, `F`, `Q`/`Esc`) remain unchanged.
+The spacing above is illustrative only; the renderer does not align columns with embedded spaces. Existing controls, overlay timeout, colors, and alpha blending remain unchanged. Pi GUI checks at 480×320 and 320×240 are still required.
+
+## Ticket 4 standalone screen configurations
+
+The candidate adds three normal config files selected with the existing `--config` option:
+
+- `config/presets/480x320-landscape.conf`
+- `config/presets/480x320-high-contrast.conf`
+- `config/presets/320x240-landscape.conf`
+
+They contain layout and color-preset values but omit `tempo`, `quantum`, and machine-specific `font_path`. P cycles colors; R reloads the same startup path; CLI overrides remain authoritative. Selecting another screen file or applying window dimensions requires restart. See `docs/SCREEN-PRESETS.md`.
 
 ## `--print-config`
 
@@ -137,9 +150,9 @@ active_color_preset=...
 ## Implementation order
 
 1. Ticket 2 color presets / P — done on accepted integration baseline.
-2. Ticket 3 runtime config reload / R — implemented on this feature branch; Pi validation and acceptance pending.
-3. Ticket 4 screen preset configs/docs — not started.
+2. Ticket 3 runtime config reload / R — published, technically complete, and Pi-validated at `334116f`.
+3. Ticket 4 screen configs/docs and left-aligned F1 information — current candidate; acceptance pending.
 
 ## Status
 
-Do not treat this document as proof of Pi validation, merge, release, or final `v0.6-pi-validated` acceptance. See ROADMAP and the continuation brief for process state.
+Ticket 3's Pi-validation statement is inherited from the accepted checkpoint. Ticket 4 is not yet accepted, merged, pushed, tagged, fully tested, or released. See ROADMAP and TEST-PLAN for its remaining gates.

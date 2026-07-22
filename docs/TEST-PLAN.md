@@ -138,7 +138,7 @@ These should fail with clear error and non-zero exit, without starting SDL or Li
 - Only colors change; fonts/layout/window/Link unaffected.
 - Base colors restore when returning to the label-only `default` preset.
 
-### Runtime Config Reload (R key) — Ticket 3 (branch; Pi acceptance pending)
+### Runtime Config Reload (R key) — Ticket 3 (published and Pi-validated)
 
 Automated (config_parser_tests / direct g++ of Config.cpp):
 
@@ -152,7 +152,7 @@ Automated (config_parser_tests / direct g++ of Config.cpp):
 - Live window width/height/fullscreen remain after reload when candidate differs; safe colors may still apply.
 - `phase_bar_margin` is validated against live width after window deferral.
 
-Manual Pi GUI (required before acceptance; not claimed by Hermes Windows builds):
+Manual Pi GUI matrix completed by the owner for the accepted Ticket 3 checkpoint:
 
 - No-config `--windowed`: F1 lists P and R; P cycles; R succeeds; P still cycles; no crash/Link restart/window recreate.
 - Explicit example config: R reloads same path; safe edits apply; P cycles after R; repeated R stable.
@@ -162,9 +162,26 @@ Manual Pi GUI (required before acceptance; not claimed by Hermes Windows builds)
 - CLI overrides remain authoritative across repeated R; tempo/quantum do not restart Link.
 - **F then R:** start `--windowed`, press F to fullscreen, press R — window stays fullscreen (no recreate); deferred difference vs startup/`--windowed` may be reported only; F again still returns to windowed. Opposite direction from initial fullscreen when practical.
 
-### Screen Preset Configs — Ticket 4 (not started)
+### Screen Preset Configs and F1 Alignment — Ticket 4 candidate
 
-- Future `config/presets/` launch-time configs only after Ticket 3 is accepted.
-- See `docs/SCREEN-PRESETS.md`.
+Automated/source checks:
+
+- Parse each real file under `config/presets/` from the repository root.
+- Assert exact dimensions, fullscreen state, font sizes, phase height/gap/margin, help timeout, and cursor preference.
+- Assert preset order `default,high_contrast`, expected initial preset, exact base and high-contrast colors, and label-only default definition.
+- Assert P advances and wraps, with default restoring base colors.
+- Assert `startupConfigPath`/`configPath` retain the selected real file and unchanged-file R succeeds.
+- Run direct `g++` parser tests, clean CMake build, CMake parser tests, inspection commands, and `--print-config` for all three files where tools are available.
+
+Required Raspberry Pi GUI matrix before Ticket 4 acceptance:
+
+- Launch all three files in fullscreen; also launch `320x240-landscape.conf` with `--windowed` and confirm actual 320×240 dimensions.
+- Confirm the high-contrast file starts in high contrast; P cycles and wraps in every file; R reloads the same selected file.
+- Confirm invalid R reload keeps the working display.
+- Confirm F1 title, keys, and actions are left-aligned, use distinct columns, and remain readable/unclipped at 480×320 and 320×240 in fullscreen and windowed modes.
+- Confirm F toggle and cursor behavior remain correct.
+- Confirm status, centered tempo, phase rendering, Link state, and window creation are unchanged; P/R do not restart Link or recreate the SDL window.
+
+See `docs/SCREEN-PRESETS.md`. Ticket 4 remains unaccepted until the source/build and Pi GUI gates pass.
 
 See `docs/RUNTIME-CONFIG.md` for implemented R/P semantics versus Ticket 4.

@@ -42,11 +42,21 @@ Using a custom config:
 ./build/link-pi-display --config config/link-pi-display.example.conf
 ```
 
+Ticket 4 candidate screen configurations:
+
+```bash
+./build/link-pi-display --config config/presets/480x320-landscape.conf
+./build/link-pi-display --config config/presets/480x320-high-contrast.conf
+./build/link-pi-display --config config/presets/320x240-landscape.conf
+```
+
 ## Controls (GUI mode)
 
 - `F1` — Show help overlay (auto-dismisses after ~8 seconds)
 - `Q` or `Esc` — Quit
 - `F` — Toggle fullscreen / windowed
+- `P` — Cycle the loaded config's color presets
+- `R` — Reload the original startup config path
 
 ## Configuration
 
@@ -73,7 +83,8 @@ These defaults are intentional for better readability on small Raspberry Pi TFT 
 The older keys `background_color` and `band_color` are still accepted as compatibility aliases but are deprecated. Use the explicit `top_band_color`, `center_band_color`, and `bottom_band_color` keys going forward.
 
 CLI options always override values from the config file.
-n## Inspection Commands (v0.5)
+
+## Inspection Commands (v0.5)
 
 - `--print-config` — Print the effective configuration (after defaults, config file, and CLI overrides) and exit.
 - `--module-info` — Print static module metadata and exit.
@@ -101,6 +112,7 @@ cmake --build build --target config_parser_tests -j"$(nproc)"
 - [Roadmap](ROADMAP.md)
 - [Module Contract](docs/MODULE-CONTRACT.md)
 - [Integration Notes](docs/INTEGRATION-NOTES.md)
+- [Screen Preset Configurations](docs/SCREEN-PRESETS.md)
 - Example config: `config/link-pi-display.example.conf`
 
 ## License
@@ -109,8 +121,8 @@ MIT License — see [LICENSE](LICENSE) file.
 
 ## Runtime Configuration (v0.6)
 
-- **P** — cycle named color presets (Ticket 2; on accepted integration baseline). Only colors change; layout, fonts, and Link state are unaffected. Dot-prefixed syntax: see `config/link-pi-display.example.conf`.
-- **R** — reload the original startup visual-config source (Ticket 3 branch). Missing/invalid reload is nonfatal and keeps the previous working configuration and fonts. Window width/height/fullscreen are not applied live (restart required). Does not restart Link or recreate the SDL window. Not Pi-accepted until owner validation.
-- **Screen preset configs** — Ticket 4, not started (`config/presets/` later).
+- **P** — cycle named color presets (Ticket 2, accepted integration behavior). Only colors change; layout, fonts, and Link state are unaffected.
+- **R** — reload the original startup visual-config source (Ticket 3, published and Pi-validated). Missing/invalid reload is nonfatal and keeps the previous working configuration and fonts. Window width/height/fullscreen are not applied live; restart is required.
+- **Screen preset configs** — Ticket 4 candidate files under `config/presets/`, selected through the existing `--config` option. The same candidate also left-aligns F1 help information. Pi GUI acceptance remains pending.
 
 Details: `docs/RUNTIME-CONFIG.md`, `docs/SCREEN-PRESETS.md`, `docs/TEST-PLAN.md`.

@@ -35,6 +35,113 @@ static Config parse_for_test(const std::vector<std::string>& args)
     return parseConfig(static_cast<int>(argv.size()), argv.data());
 }
 
+static bool rgbaEquals(const RgbaColor& color, int r, int g, int b, int a)
+{
+    return color.r == r && color.g == g && color.b == b && color.a == a;
+}
+
+static void testScreenPreset(const std::string& testName,
+                             const std::string& path,
+                             int width,
+                             int height,
+                             int statusFontSize,
+                             int tempoFontSize,
+                             int bottomFontSize,
+                             int helpFontSize,
+                             int phaseBarHeight,
+                             int phaseBarGap,
+                             int phaseBarMargin,
+                             const std::string& initialPreset)
+{
+    Config c = parse_for_test({"test", "--config", path});
+
+    expect(testName + "_layout",
+           c.width == width && c.height == height && c.fullscreen);
+    expect(testName + "_font_sizes",
+           c.statusFontSize == statusFontSize
+           && c.tempoFontSize == tempoFontSize
+           && c.bottomFontSize == bottomFontSize
+           && c.helpFontSize == helpFontSize);
+    expect(testName + "_phase_layout",
+           c.phaseBarHeight == phaseBarHeight
+           && c.phaseBarSegmentGap == phaseBarGap
+           && c.phaseBarMargin == phaseBarMargin);
+    expect(testName + "_runtime_defaults",
+           c.helpOverlaySeconds == 8 && c.hideMouseCursor
+           && c.initialTempo == 120.0 && c.quantum == 4.0);
+    expect(testName + "_preset_order",
+           c.colorPresetNames.size() == 2
+           && c.colorPresetNames[0] == "default"
+           && c.colorPresetNames[1] == "high_contrast");
+    expect(testName + "_labels_and_label_only_default",
+           c.colorPresetLabels["default"] == "Default"
+           && c.colorPresetLabels["high_contrast"] == "High Contrast"
+           && c.colorPresetOverrides.count("default") == 0);
+    expect(testName + "_startup_path",
+           c.startupConfigPath == path && c.configPath == path);
+    expect(testName + "_initial_preset",
+           getActiveColorPresetName(c) == initialPreset);
+
+    const auto baseColorsAreExact = [&]() {
+        return rgbaEquals(c.topBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.centerBandColor, 18, 18, 18, 255)
+            && rgbaEquals(c.bottomBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.statusInactiveColor, 40, 44, 48, 255)
+            && rgbaEquals(c.statusNoPeersColor, 40, 44, 48, 255)
+            && rgbaEquals(c.statusConnectedColor, 75, 85, 95, 255)
+            && rgbaEquals(c.tempoColor, 64, 79, 96, 255)
+            && rgbaEquals(c.phaseBarColor, 83, 114, 151, 255)
+            && rgbaEquals(c.phaseMarkerColor, 255, 255, 255, 255)
+            && rgbaEquals(c.helpOverlayBackgroundColor, 0, 0, 0, 220)
+            && rgbaEquals(c.helpOverlayTextColor, 210, 210, 210, 255);
+    };
+    const auto highContrastColorsAreExact = [&]() {
+        return rgbaEquals(c.statusInactiveColor, 220, 220, 220, 255)
+            && rgbaEquals(c.statusNoPeersColor, 220, 220, 220, 255)
+            && rgbaEquals(c.statusConnectedColor, 255, 255, 255, 255)
+            && rgbaEquals(c.tempoColor, 255, 255, 255, 255)
+            && rgbaEquals(c.phaseBarColor, 255, 255, 255, 255)
+            && rgbaEquals(c.phaseMarkerColor, 0, 0, 0, 255)
+            && rgbaEquals(c.topBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.centerBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.bottomBandColor, 0, 0, 0, 255)
+            && rgbaEquals(c.helpOverlayBackgroundColor, 0, 0, 0, 230)
+            && rgbaEquals(c.helpOverlayTextColor, 255, 255, 255, 255);
+    };
+
+    if (initialPreset == "default")
+        expect(testName + "_initial_base_colors", baseColorsAreExact());
+    else
+        expect(testName + "_initial_high_contrast_colors", highContrastColorsAreExact());
+
+    const bool reloadOk = tryReloadConfig(c);
+    const bool reloadColorsAreExact = initialPreset == "default"
+        ? baseColorsAreExact()
+        : highContrastColorsAreExact();
+    expect(testName + "_unchanged_reload",
+           reloadOk && c.startupConfigPath == path && c.configPath == path
+           && getActiveColorPresetName(c) == initialPreset
+           && reloadColorsAreExact);
+
+    cycleColorPreset(c);
+    if (initialPreset == "default")
+    {
+        expect(testName + "_p_to_high_contrast",
+               getActiveColorPresetName(c) == "high_contrast" && highContrastColorsAreExact());
+        cycleColorPreset(c);
+        expect(testName + "_p_wrap_restores_base",
+               getActiveColorPresetName(c) == "default" && baseColorsAreExact());
+    }
+    else
+    {
+        expect(testName + "_p_to_default_restores_base",
+               getActiveColorPresetName(c) == "default" && baseColorsAreExact());
+        cycleColorPreset(c);
+        expect(testName + "_p_wraps_high_contrast",
+               getActiveColorPresetName(c) == "high_contrast" && highContrastColorsAreExact());
+    }
+}
+
 // Run a child test case by re-executing self with special flag
 static int run_child(const std::string& case_name, const std::vector<std::string>& args)
 {
@@ -123,6 +230,16 @@ int main(int argc, char** argv)
         expect("example_config_cycle_restores_base_marker",
                c.phaseMarkerColor.r == base_marker_r && c.phaseMarkerColor.r == 255);
     }
+
+    testScreenPreset("screen_480x320_landscape",
+                     "config/presets/480x320-landscape.conf",
+                     480, 320, 30, 110, 25, 20, 22, 6, 24, "default");
+    testScreenPreset("screen_480x320_high_contrast",
+                     "config/presets/480x320-high-contrast.conf",
+                     480, 320, 30, 110, 25, 20, 22, 6, 24, "high_contrast");
+    testScreenPreset("screen_320x240_landscape",
+                     "config/presets/320x240-landscape.conf",
+                     320, 240, 22, 80, 18, 16, 16, 4, 16, "default");
 
     {
         Config c = parse_for_test({"test", "--windowed", "--width", "640", "--tempo", "125"});

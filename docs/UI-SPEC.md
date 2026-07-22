@@ -52,12 +52,16 @@ The older keys `background_color` and `band_color` are supported only as depreca
 - Press **F1** in GUI mode to show a brief help overlay.
 - The overlay auto-dismisses after the configured number of seconds (`help_overlay_seconds`, default 8).
 - Overlay uses actual renderer output size for positioning.
-- Overlay text:
+- Ticket 4 candidate placement keeps the panel centered while left-aligning the title, key column, and action column. Keys and actions are rendered separately rather than aligned with embedded spaces:
   ```
   F1 Help
-  Q / Esc  Quit
-  F        Toggle Fullscreen
+  Q / Esc    Quit
+  F          Toggle Fullscreen
+  P          Color preset
+  R          Reload config
   ```
+- Row order, configured colors, alpha blending, timeout, and approximate panel size are preserved.
+- The candidate targets readable, unclipped output at both 480×320 and 320×240 in fullscreen and windowed modes; Pi GUI validation remains required.
 
 ## Configuration
 
@@ -73,6 +77,14 @@ See `config/link-pi-display.example.conf` for the full list of supported keys.
 
 CLI options override config-file values.
 
+## Supplied screen configurations (Ticket 4 candidate)
+
+- `config/presets/480x320-landscape.conf` — 480×320 fullscreen, starts with `default` colors.
+- `config/presets/480x320-high-contrast.conf` — 480×320 fullscreen, starts with `high_contrast` colors.
+- `config/presets/320x240-landscape.conf` — 320×240 fullscreen with smaller status/tempo/bottom/help fonts and phase-bar dimensions.
+
+These are ordinary launch-time `--config` files. Selecting another screen configuration or applying changed window dimensions requires restart. P cycles colors and R reloads the same startup file without recreating the window.
+
 ## Fullscreen Cursor Behavior (v0.4)
 
 - When `hide_mouse_cursor=true` (default) and the app is in fullscreen, the mouse cursor is hidden.
@@ -80,18 +92,10 @@ CLI options override config-file values.
 - Cursor state is not written back to the config file.
 - The cursor is restored on application exit.
 
-## Planned Future Extensions (v0.6+)
+## Runtime visual controls (v0.6)
 
-The following runtime visual adjustments are planned but not yet implemented:
+- `P` cycles named color presets and changes colors only.
+- `R` reloads the original startup config path transactionally; window size/fullscreen remain launch-time settings and Link/window creation are unchanged.
+- `F` continues to toggle the live fullscreen state.
 
-- `R` key: reload current config source (safe visual settings and fonts only; window size and fullscreen mode remain launch-time only).
-- `P` key: cycle named color presets defined inside the current config. Only colors are changed.
-
-See `docs/RUNTIME-CONFIG.md` for the full planned design.
-
-Future help overlay text is expected to include:
-
-```
-R Reload config
-P Color preset
-```
+Ticket 3 P/R behavior is accepted and Pi-validated. Ticket 4 screen-file and F1-placement changes remain candidate work pending automated Linux/Pi and visual acceptance. See `docs/RUNTIME-CONFIG.md`.

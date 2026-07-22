@@ -1,14 +1,16 @@
-# Screen Presets (Planned)
+# Screen Preset Configurations
 
-This document describes the **planned** screen preset system.
+Ticket 4 supplies three ordinary, standalone configuration files under `config/presets/`. Each is selected at launch through the existing `--config` option; there is no screen-preset parser, include mechanism, selector, or runtime screen switch.
 
-This is a design/spec document. No screen preset functionality is implemented yet.
+## Supplied files
 
-## What is a Screen Preset?
+| File | Layout | Initial color preset |
+|---|---|---|
+| `480x320-landscape.conf` | 480×320 fullscreen | `default` |
+| `480x320-high-contrast.conf` | 480×320 fullscreen | `high_contrast` |
+| `320x240-landscape.conf` | 320×240 fullscreen | `default` |
 
-A screen preset is a complete, standalone configuration file chosen at launch time. It is intended to support different physical displays (different resolutions, orientations, contrast needs, etc.) without requiring code changes or recompilation.
-
-Example future usage:
+Launch examples:
 
 ```bash
 ./build/link-pi-display --config config/presets/480x320-landscape.conf
@@ -16,43 +18,25 @@ Example future usage:
 ./build/link-pi-display --config config/presets/320x240-landscape.conf
 ```
 
-## Location
+Use `--windowed` for inspection while retaining the selected file's configured dimensions:
 
-Screen preset config files are planned to live under:
-
-```
-config/presets/
+```bash
+./build/link-pi-display --config config/presets/320x240-landscape.conf --windowed
 ```
 
-This directory will contain normal config files using the same syntax as `config/link-pi-display.example.conf`.
+## Runtime controls and precedence
 
-## What a Screen Preset May Define
+- **P** cycles `default` and `high_contrast` inside the loaded file and wraps in file order. The label-only `default` restores the file's base colors.
+- **R** reloads the same startup config path. It does not choose another screen file, restart Link, or recreate the SDL window.
+- Command-line options override file values at startup and remain authoritative across R reloads.
+- To select another screen configuration or apply changed `width`, `height`, or `fullscreen`, restart with the desired `--config` path.
 
-A screen preset config file is expected to be able to contain any currently supported configuration key, plus future color preset definitions:
+The files intentionally omit `tempo` and `quantum`, so choosing a screen configuration does not alter Link/runtime values.
 
-- `width`, `height`, `fullscreen`
-- `font_path` and font sizes
-- `phase_bar_*` dimensions
-- Band background colors (`top_band_color`, `center_band_color`, `bottom_band_color`)
-- Status, tempo, phase, and help overlay colors
-- One or more named color presets (see RUNTIME-CONFIG.md)
+## Font portability
 
-## Launch-Time vs Runtime Distinction (Planned)
+The supplied files omit `font_path`. The application may discover an installed system font, or the operator may provide a portable host-specific path with `--font PATH`. No machine-specific or bundled font path is embedded in these files.
 
-- **Launch-time only** (first implementation):
-  - `width`, `height`, `fullscreen` — these determine the SDL window / renderer at startup.
-  - Changing these at runtime via `R` will be deferred or reported as requiring restart.
+## Candidate status
 
-- **Runtime reloadable** (via `R` key, planned):
-  - Colors (via color presets or direct)
-  - Fonts (transactionally, if practical)
-
-## Relationship to Color Presets
-
-A screen preset can contain multiple named color presets. The `P` key will cycle among the color presets defined inside the *currently loaded* screen preset (or base config).
-
-Switching to a different screen preset always requires restarting the application with a different `--config` path.
-
-## Status
-
-Screen preset support is **planned** and not yet implemented. See ROADMAP.md for the intended implementation sequence.
+The files and left-aligned F1 help are Ticket 4 candidate work. Automated parser/build checks and Raspberry Pi GUI validation remain required before Ticket 4 acceptance. This documentation does not claim a merge, push, tag, final v0.6 release, or Pi acceptance.
