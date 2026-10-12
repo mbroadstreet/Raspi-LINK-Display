@@ -113,6 +113,7 @@ cmake --build build --target config_parser_tests -j"$(nproc)"
 - [Module Contract](docs/MODULE-CONTRACT.md)
 - [Integration Notes](docs/INTEGRATION-NOTES.md)
 - [Screen Preset Configurations](docs/SCREEN-PRESETS.md)
+- [SSH / Existing-Desktop Launcher](docs/DESKTOP-LAUNCH.md)
 - Example config: `config/link-pi-display.example.conf`
 
 ## License

@@ -1,0 +1,801 @@
+#!/usr/bin/env python3
+"""Manual, same-user X11 desktop launcher. Python standard library only."""
+import argparse
+import contextlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+DESCRIPTION = "Raspi Link Display (link-displayctl)"
+ENV_KEYS = {"DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS"}
+MARKER_KEY = "LINK_DISPLAYCTL_LAUNCH_ID"
+PROC_ROOT = Path("/proc")
+UNIT_PROPERTIES = ["Id", "LoadState", "ActiveState", "SubState", "MainPID", "Result", "ExecMainStatus", "InvocationID", "ControlGroup", "Description", "Transient", "Environment", "KillMode", "KillSignal", "SendSIGKILL", "SendSIGHUP", "Restart", "ExecStop", "ExecStopPost", "TimeoutStopFailureMode", "FailureAction", "SuccessAction", "OnFailure"]
+
+
+class LaunchError(Exception):
+    pass
+
+
+def command(argv, check=True, timeout=15, env=None, cwd=None):
+    try:
+        result = subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=env, cwd=cwd)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LaunchError("Command failed or timed out: {}: {}".format(argv[0], exc)) from exc
+    if check and result.returncode:
+        raise LaunchError("{} failed ({}): {}".format(argv[0], result.returncode, (result.stderr or result.stdout).strip()))
+    return result
+
+
+def properties(text):
+    return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+
+
+def validate_unit(name):
+    if not re.fullmatch(r"raspi-link-display(?:-[A-Za-z0-9_-]+)?\.service", name):
+        raise LaunchError("Unit must be raspi-link-display[-suffix].service")
+    return name
+
+
+def unit_state(unit):
+    args = ["systemctl", "--user", "show", "--all", unit]
+    args += ["--property=" + key for key in UNIT_PROPERTIES]
+    result = command(args, check=False)
+    state = properties(result.stdout)
+    if result.returncode and state.get("LoadState") != "not-found":
+        raise LaunchError("Cannot query user manager: " + (result.stderr or result.stdout).strip())
+    if "LoadState" not in state:
+        raise LaunchError("User manager returned no unit state")
+    # systemctl 247 omits empty command arrays even with --all. Establish
+    # absence through D-Bus instead of assuming an omitted property is safe.
+    if state["LoadState"] != "not-found":
+        object_path = "/org/freedesktop/systemd1/unit/" + "".join(
+            char if char.isascii() and char.isalnum() else "_{:02x}".format(ord(char))
+            for char in validate_unit(unit)
+        )
+        for name in ("ExecStop", "ExecStopPost"):
+            if name not in state:
+                native = command(["busctl", "--user", "get-property", "org.freedesktop.systemd1", object_path, "org.freedesktop.systemd1.Service", name]).stdout.strip()
+                count = re.match(r"^a\([A-Za-z()]+\) ([0-9]+)(?:\s|$)", native)
+                if not count:
+                    raise LaunchError("Cannot establish native stop-command array: " + name)
+                state[name] = "" if int(count.group(1)) == 0 else native
+    return state
+
+
+def require_owned(state, record=None):
+    if state.get("LoadState") == "not-found":
+        return False
+    if state.get("Transient") != "yes" or state.get("Description") != DESCRIPTION:
+        raise LaunchError("Refusing to control a foreign/non-transient unit with this name")
+    if not record:
+        raise LaunchError("No verified launch provenance; old services require explicit verified migration")
+    safe = {"KillMode": "control-group", "SendSIGKILL": "no", "SendSIGHUP": "no", "Restart": "no", "ExecStop": "", "ExecStopPost": "", "TimeoutStopFailureMode": "terminate", "FailureAction": "none", "SuccessAction": "none", "OnFailure": ""}
+    if any(state.get(k) != v for k, v in safe.items()) or state.get("KillSignal") not in ("15", "SIGTERM"):
+        raise LaunchError("Refusing unsafe service shutdown properties")
+    if state.get("Id") != record["unit"]:
+        raise LaunchError("Service unit identity differs from recorded unit")
+    provenance = record["provenance"]
+    if provenance["kind"] == "launch":
+        try:
+            markers = [v for v in shlex.split(state.get("Environment", "")) if v.startswith(MARKER_KEY + "=")]
+        except ValueError as exc:
+            raise LaunchError("Cannot parse service ownership environment") from exc
+        if markers != [MARKER_KEY + "=" + provenance["marker"]]:
+            raise LaunchError("Service launch marker differs; refusing foreign/recreated unit")
+    elif state.get("ControlGroup") != provenance["control_group"] and (state.get("ControlGroup") or state.get("ActiveState") not in ("inactive", "failed")):
+        raise LaunchError("Verified legacy service cgroup differs")
+    invocation = state.get("InvocationID", "")
+    if not re.fullmatch(r"[0-9a-f]{32}", invocation):
+        raise LaunchError("Service has no valid InvocationID")
+    if record["invocation_id"] is not None and record["invocation_id"] != invocation:
+        raise LaunchError("InvocationID differs; refusing foreign/recreated unit")
+    pid = int(state.get("MainPID") or 0)
+    if pid:
+        identity = process_identity(pid)
+        if not matches_process_identity(record, identity):
+            raise LaunchError("Service process identity differs or cannot be verified")
+    elif state.get("ActiveState") == "active":
+        raise LaunchError("Active service has no verifiable main process")
+    return True
+
+
+def reconcile_record(state, record, path):
+    if not require_owned(state, record):
+        return record
+    updated = dict(record)
+    updated["invocation_id"] = state["InvocationID"]
+    pid = int(state.get("MainPID") or 0)
+    if pid:
+        observed = process_identity(pid)
+        if not matches_process_identity(record, observed):
+            raise LaunchError("Main process disappeared or changed while recording identity")
+        # Keep the initial image pin/path, including verified-legacy evidence.
+        # The kernel's deleted annotation is an observation, not a new image.
+        updated["identity"] = record["identity"] if same_executable_identity(record["identity"], observed) else observed
+    if state.get("ActiveState") == "active":
+        updated["phase"] = "pending" if launch_wrapper(record, updated["identity"]) else "running"
+    elif state.get("ActiveState") in ("failed", "inactive"):
+        updated["phase"] = "failed" if state["ActiveState"] == "failed" else "stopped"
+    if updated != record:
+        save_state(path, updated)
+    return updated
+
+
+def unified_cgroup_mount():
+    # Deliberately reject v1/hybrid: absence of a v2 path cannot prove emptiness there.
+    try:
+        membership = (PROC_ROOT / "self/cgroup").read_text().splitlines()
+        mounts = (PROC_ROOT / "self/mountinfo").read_text().splitlines()
+        found = []
+        for line in mounts:
+            before, after = line.split(" - ", 1)
+            fields, filesystem = before.split(), after.split()[0]
+            if filesystem == "cgroup":
+                raise LaunchError("Unsupported v1/hybrid cgroup hierarchy; unified cgroup2 is required")
+            if filesystem == "cgroup2":
+                decode = lambda s: re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), s)
+                if decode(fields[3]) != "/":
+                    raise LaunchError("Unsupported cgroup2 subtree mount")
+                found.append(Path(decode(fields[4])))
+        if len(membership) != 1 or not membership[0].startswith("0::/") or len(found) != 1 or not found[0].is_absolute():
+            raise LaunchError("Unsupported cgroup hierarchy; one unified cgroup2 mount is required")
+        return found[0].resolve(strict=True)
+    except (OSError, ValueError, IndexError) as exc:
+        raise LaunchError("Cannot establish unified cgroup mount: " + str(exc)) from exc
+
+
+def cgroup_pids(state):
+    root = unified_cgroup_mount()
+    if state.get("LoadState") == "not-found":
+        return []
+    group = state.get("ControlGroup", "")
+    if not group:
+        if state.get("ActiveState") in ("active", "activating", "deactivating") or int(state.get("MainPID") or 0):
+            raise LaunchError("Live service has no inspectable cgroup")
+        return []
+    if not valid_cgroup(group):
+        raise LaunchError("Unsafe service cgroup path")
+    path = (root / group.lstrip("/")).resolve()
+    if path == root or root not in path.parents:
+        raise LaunchError("Unsafe service cgroup path")
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise LaunchError("Cannot inspect service cgroup: " + str(exc)) from exc
+    try:
+        def walk_error(exc):
+            raise exc
+        pids = set()
+        for directory, _, _ in os.walk(str(path), onerror=walk_error, followlinks=False):
+            try:
+                pids.update(int(x) for x in (Path(directory) / "cgroup.procs").read_text().split())
+            except FileNotFoundError:
+                # A cgroup may disappear during inspection, but a surviving one must be readable.
+                if Path(directory).exists():
+                    raise
+        return sorted(pids)
+    except (OSError, ValueError) as exc:
+        raise LaunchError("Cannot inspect owned service processes: " + str(exc)) from exc
+
+
+def read_environment(path):
+    try:
+        pairs = [item.split(b"=", 1) for item in Path(path).read_bytes().split(b"\0") if b"=" in item]
+        return {key.decode(): value.decode(errors="replace") for key, value in pairs if key.decode(errors="replace") in ENV_KEYS}
+    except OSError:
+        return {}
+
+
+def desktop_environment(session=None):
+    result = command(["loginctl", "list-sessions", "--no-legend", "--no-pager"])
+    candidates = []
+    for line in result.stdout.splitlines():
+        sid = line.split()[0]
+        if session is not None and sid != session:
+            continue
+        args = ["loginctl", "show-session", sid]
+        args += ["--property=" + p for p in ("User", "Remote", "Type", "State", "Display", "Leader")]
+        state = properties(command(args).stdout)
+        if state.get("User") == str(os.getuid()) and state.get("Remote") == "no" and state.get("State") == "active" and state.get("Type") in ("x11", "wayland"):
+            candidates.append((sid, state))
+    if len(candidates) != 1:
+        raise LaunchError("Need exactly one active same-user local graphical session; found {}. Use --session ID if ambiguous.".format(len(candidates)))
+    sid, state = candidates[0]
+    if state["Type"] != "x11":
+        raise LaunchError("Only X11 is supported by this launcher; Wayland needs separate validation")
+    display = state.get("Display")
+    environments = []
+    leader = state.get("Leader", "")
+    if leader.isdigit():
+        environments.append(read_environment(Path("/proc") / leader / "environ"))
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if proc.stat().st_uid != os.getuid():
+                continue
+            env = read_environment(proc / "environ")
+            if env.get("DISPLAY") == display and env.get("XAUTHORITY"):
+                environments.append(env)
+        except OSError:
+            continue
+    # The user manager is a fallback only; values must agree with the selected login.
+    manager = properties(command(["systemctl", "--user", "show-environment"]).stdout)
+    if manager.get("DISPLAY") == display:
+        environments.append({k: v for k, v in manager.items() if k in ENV_KEYS})
+    auth = {e["XAUTHORITY"] for e in environments if e.get("DISPLAY") == display and e.get("XAUTHORITY")}
+    if len(auth) != 1:
+        raise LaunchError("Desktop Xauthority path is absent or ambiguous; refusing to guess")
+    env = {"DISPLAY": display, "XAUTHORITY": auth.pop(), "XDG_SESSION_TYPE": "x11", "XDG_RUNTIME_DIR": str(runtime_root())}
+    for e in environments:
+        if e.get("DBUS_SESSION_BUS_ADDRESS"):
+            env["DBUS_SESSION_BUS_ADDRESS"] = e["DBUS_SESSION_BUS_ADDRESS"]
+            break
+    validate_desktop_values(env)
+    run_env = os.environ.copy()
+    run_env.update(env)
+    command(["xset", "q"], env=run_env)
+    return sid, env
+
+
+def validate_desktop_values(env):
+    if env.get("XDG_SESSION_TYPE") != "x11":
+        raise LaunchError("Only X11 is supported")
+    if not env.get("DISPLAY") or not env.get("XAUTHORITY"):
+        raise LaunchError("Missing desktop display or authority path")
+    path = Path(env["XAUTHORITY"])
+    if not path.is_absolute() or not path.is_file() or not os.access(str(path), os.R_OK):
+        raise LaunchError("Desktop authority file is not readable: " + str(path))
+
+
+def runtime_root():
+    path = Path("/run/user/{}".format(os.getuid()))
+    try:
+        info = path.stat()
+    except OSError as exc:
+        raise LaunchError("No user runtime directory; an active desktop/login is required") from exc
+    if info.st_uid != os.getuid() or info.st_mode & 0o022:
+        raise LaunchError("User runtime directory ownership/permissions are unsafe")
+    return path
+
+
+def state_path(unit, create=False):
+    directory = runtime_root() / "raspi-link-display"
+    if directory.is_symlink():
+        raise LaunchError("Refusing symlinked launcher state directory")
+    if create:
+        directory.mkdir(mode=0o700, exist_ok=True)
+    if directory.exists():
+        info = directory.stat()
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise LaunchError("Launcher state directory must be private to this user")
+    return directory / (unit + ".json")
+
+
+@contextlib.contextmanager
+def lifecycle_lock(unit):
+    import fcntl
+    # All supported unit names share the duplicate-check/create critical section.
+    path = state_path(unit, create=True).parent / "lifecycle.lock"
+    fd = os.open(str(path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def valid_cgroup(group):
+    return isinstance(group, str) and group.startswith("/") and all(p not in ("", ".", "..") for p in group[1:].split("/"))
+
+
+def valid_identity(value):
+    return (isinstance(value, dict) and set(value) == {"pid", "start_ticks", "executable", "exe_device", "exe_inode", "exe_unlinked"}
+            and type(value["pid"]) is int and value["pid"] > 0
+            and isinstance(value["start_ticks"], str) and re.fullmatch(r"[1-9][0-9]*", value["start_ticks"]) is not None
+            and isinstance(value["executable"], str) and Path(value["executable"]).is_absolute()
+            and type(value["exe_device"]) is int and value["exe_device"] >= 0
+            and type(value["exe_inode"]) is int and value["exe_inode"] > 0
+            and type(value["exe_unlinked"]) is bool)
+
+
+def same_executable_identity(known, observed):
+    if not valid_identity(known) or not valid_identity(observed):
+        return False
+    if any(known[k] != observed[k] for k in ("pid", "start_ticks", "exe_device", "exe_inode")):
+        return False
+    # Never strip a suffix from a literal filename. Only accept one additional
+    # kernel annotation when /proc/exe still refers to the pinned, unlinked inode.
+    return (observed["executable"] == known["executable"]
+            or (observed["exe_unlinked"] and observed["executable"] == known["executable"] + " (deleted)"))
+
+
+def launch_wrapper(record, identity):
+    return (record["provenance"]["kind"] == "launch" and identity is not None
+            and identity["executable"] == str(Path("/usr/bin/env").resolve())
+            and identity["executable"] != record["spec"]["binary"])
+
+
+def matches_launch_command(record, identity):
+    if identity["executable"] == record["spec"]["binary"]:
+        return True
+    # A shebang fixture has an interpreter executable but retains the selected
+    # script path in argv. Keep this pre-existing test/launcher behavior.
+    try:
+        argv = (PROC_ROOT / str(identity["pid"]) / "cmdline").read_bytes().split(b"\0")
+        return os.fsencode(record["spec"]["binary"]) in argv[:2]
+    except OSError:
+        return False
+
+
+def matches_process_identity(record, identity):
+    if not valid_identity(identity):
+        return False
+    known = record["identity"]
+    if known is None:
+        return matches_launch_command(record, identity) or launch_wrapper(record, identity)
+    if same_executable_identity(known, identity):
+        return True
+    # env execs the selected binary without changing PID/start ticks. Only this
+    # bounded, expected startup transition may update a persisted executable.
+    return (record["phase"] in ("pending", "failed") and launch_wrapper(record, known)
+            and identity["pid"] == known["pid"] and identity["start_ticks"] == known["start_ticks"]
+            and matches_launch_command(record, identity))
+
+
+def validate_record(value):
+    keys = {"version", "unit", "phase", "spec", "desktop", "session", "provenance", "invocation_id", "identity"}
+    if not isinstance(value, dict) or set(value) != keys or type(value["version"]) is not int or value["version"] != 3:
+        raise ValueError("State has an invalid schema; legacy records require explicit verified migration")
+    if not isinstance(value["unit"], str):
+        raise ValueError("State unit is invalid")
+    validate_unit(value["unit"])
+    if value["phase"] not in ("pending", "running", "failed", "stopped"):
+        raise ValueError("State phase is invalid")
+    spec = value["spec"]
+    if not isinstance(spec, dict) or set(spec) != {"project", "binary", "config", "windowed"}:
+        raise ValueError("State has an invalid launch specification")
+    if any(not isinstance(spec[k], str) or not Path(spec[k]).is_absolute() for k in ("project", "binary", "config")) or not isinstance(spec["windowed"], bool):
+        raise ValueError("State launch paths/flags are invalid")
+    env = value["desktop"]
+    if not isinstance(env, dict) or set(env) - ENV_KEYS or any(not isinstance(v, str) for v in env.values()):
+        raise ValueError("State desktop environment is invalid")
+    if any(not env.get(k) for k in ("DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR")) or env.get("XDG_SESSION_TYPE") != "x11":
+        raise ValueError("State desktop environment is incomplete")
+    if not isinstance(value["session"], str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value["session"]):
+        raise ValueError("State session is invalid")
+    invocation, identity = value["invocation_id"], value["identity"]
+    if invocation is not None and (not isinstance(invocation, str) or not re.fullmatch(r"[0-9a-f]{32}", invocation)):
+        raise ValueError("State InvocationID is invalid")
+    if identity is not None and (invocation is None or not valid_identity(identity)):
+        raise ValueError("State process identity is invalid")
+    if value["phase"] == "running" and (invocation is None or identity is None):
+        raise ValueError("Running state requires InvocationID and process identity")
+    provenance = value["provenance"]
+    if not isinstance(provenance, dict):
+        raise ValueError("State provenance is invalid")
+    if provenance.get("kind") == "launch":
+        if set(provenance) != {"kind", "marker"} or not isinstance(provenance["marker"], str) or not re.fullmatch(r"[0-9a-f]{32}", provenance["marker"]):
+            raise ValueError("State launch marker is invalid")
+    elif provenance.get("kind") == "verified-legacy":
+        if (set(provenance) != {"kind", "invocation_id", "identity", "control_group"}
+                or invocation is None or identity is None or value["phase"] == "pending"
+                or provenance["invocation_id"] != invocation or provenance["identity"] != identity
+                or not valid_cgroup(provenance["control_group"])):
+            raise ValueError("Legacy migration must pin verified invocation, identity and cgroup")
+    else:
+        raise ValueError("State provenance kind is invalid")
+
+
+def read_state(path):
+    if path.is_symlink():
+        raise LaunchError("Refusing symlinked launcher state file")
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text())
+        validate_record(value)
+        if path.name != value["unit"] + ".json":
+            raise ValueError("State filename and unit differ")
+        return value
+    except (OSError, ValueError) as exc:
+        raise LaunchError("Cannot read launcher state: " + str(exc)) from exc
+
+
+def save_state(path, value):
+    validate_record(value)
+    temp = path.with_suffix(".tmp")
+    if temp.is_symlink():
+        raise LaunchError("Refusing symlinked temporary state")
+    fd = os.open(str(temp), os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(value, stream, indent=2)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(str(temp), str(path))
+
+
+def load_settings(path, required=False):
+    if not path.exists():
+        if required:
+            raise LaunchError("Explicit settings file does not exist: " + str(path))
+        return {}
+    try:
+        value = json.loads(path.read_text())
+        if not isinstance(value, dict) or set(value) - {"project", "binary", "config"} or any(not isinstance(v, str) for v in value.values()):
+            raise ValueError("Settings require only string project/binary/config paths")
+        if any(not Path(v).expanduser().is_absolute() for v in value.values()):
+            raise ValueError("Settings bindings must be absolute paths (or start with ~)")
+        return value
+    except (OSError, ValueError) as exc:
+        raise LaunchError("Invalid launcher settings: " + str(exc)) from exc
+
+
+def make_spec(args, settings, previous=None):
+    base = settings if args.settings is not None else (previous or settings)
+    root = Path(args.project or base.get("project") or Path(__file__).resolve().parent.parent).expanduser().resolve()
+    binary = Path(args.binary or base.get("binary") or root / "build/link-pi-display").expanduser().resolve()
+    config = Path(args.config or base.get("config") or root / "config/presets/480x320-landscape.conf").expanduser().resolve()
+    return {"project": str(root), "binary": str(binary), "config": str(config), "windowed": args.windowed if args.windowed is not None else bool(base.get("windowed", False))}
+
+
+def validate_spec(spec):
+    for key in ("project", "binary", "config"):
+        path = Path(spec[key])
+        valid = path.is_dir() if key == "project" else path.is_file()
+        if not valid:
+            raise LaunchError("{} does not exist: {}".format(key, path))
+    if not os.access(spec["binary"], os.X_OK):
+        raise LaunchError("Application binary is not executable")
+    argv = [spec["binary"], "--config", spec["config"], "--print-config"]
+    if spec["windowed"]:
+        argv.append("--windowed")
+    command(argv, env=dict(os.environ), timeout=15, cwd=spec["project"])
+
+
+def require_matching_spec(current, requested):
+    if current != requested:
+        raise LaunchError("Already running with different settings; use explicit restart. Current instance unchanged.")
+    return False
+
+
+def start_ticks(stat_text):
+    return stat_text.rsplit(")", 1)[1].split()[19]
+
+
+def process_identity(pid):
+    try:
+        p = PROC_ROOT / str(pid)
+        ticks = start_ticks((p / "stat").read_text())
+        before = (p / "exe").stat()
+        executable = os.readlink(str(p / "exe"))
+        after = (p / "exe").stat()
+        if ((before.st_dev, before.st_ino, before.st_nlink) != (after.st_dev, after.st_ino, after.st_nlink)
+                or ticks != start_ticks((p / "stat").read_text())):
+            return None
+        return {"pid": int(pid), "start_ticks": ticks, "executable": executable,
+                "exe_device": after.st_dev, "exe_inode": after.st_ino, "exe_unlinked": after.st_nlink == 0}
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def unmanaged_instances(spec, owned):
+    found = []
+    binary = Path(spec["binary"])
+    for p in PROC_ROOT.iterdir():
+        if not p.name.isdigit() or int(p.name) in owned:
+            continue
+        try:
+            if p.stat().st_uid != os.getuid():
+                continue
+        except OSError:
+            continue
+        # Either source can identify a process; a deleted exe or denied symlink must
+        # not prevent cmdline inspection (and vice versa).
+        try:
+            argv = (p / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            argv = []
+        try:
+            raw = os.readlink(str(p / "exe"))
+            executable = Path(raw)
+        except OSError:
+            raw, executable = None, None
+        command_match = any(Path(os.fsdecode(a)).name == binary.name for a in argv[:2] if a)
+        # Match the untouched pathname first: the suffix may be a literal name.
+        executable_match = executable is not None and (executable == binary or executable.name == binary.name)
+        if not executable_match and not command_match and raw is not None and raw.endswith(" (deleted)"):
+            candidate = Path(raw[:-len(" (deleted)")])
+            if candidate == binary or candidate.name == binary.name:
+                try:
+                    before = (p / "exe").stat()
+                    observed = os.readlink(str(p / "exe"))
+                    after = (p / "exe").stat()
+                except OSError as exc:
+                    raise LaunchError("Cannot establish unmanaged executable unlink evidence for PID {}: {}".format(p.name, exc)) from exc
+                if (observed != raw or (before.st_dev, before.st_ino, before.st_nlink)
+                        != (after.st_dev, after.st_ino, after.st_nlink)):
+                    raise LaunchError("Unmanaged executable unlink evidence changed for PID " + p.name)
+                # Only one EXTRA kernel annotation is classified, never a literal
+                # suffix on a still-linked image (or an unverified stat failure).
+                executable_match = after.st_nlink == 0
+        if executable_match or command_match:
+            found.append(int(p.name))
+    return sorted(found)
+
+
+def service_arguments(unit, spec, env, marker=None):
+    argv = ["systemd-run", "--user", "--unit=" + unit, "--description=" + DESCRIPTION, "--service-type=exec", "--working-directory=" + spec["project"]]
+    argv += ["--property=" + p for p in ("Restart=no", "KillMode=control-group", "KillSignal=SIGTERM", "TimeoutStopSec=10s", "TimeoutStopFailureMode=terminate", "SendSIGKILL=no", "SendSIGHUP=no", "FailureAction=none", "SuccessAction=none", "StandardInput=null", "StandardOutput=journal", "StandardError=journal")]
+    argv += ["--setenv=" + k + "=" + v for k, v in sorted(env.items()) if k in ENV_KEYS]
+    if marker is not None:
+        argv.append("--setenv=" + MARKER_KEY + "=" + marker)
+    argv += ["--setenv=SDL_VIDEODRIVER=x11"]
+    # v247 expands argv even without a shell; $$ is its literal-dollar escape.
+    # Executable paths themselves are NOT expanded, so use env as the fixed
+    # executable and pass the selected binary as an escaped argument to exec.
+    application = [spec["binary"], "--config", spec["config"]]
+    if spec["windowed"]:
+        application.append("--windowed")
+    argv += ["/usr/bin/env", "--"] + [a.replace("$", "$$") for a in application]
+    return argv
+
+
+def mapped_windows(pid, env):
+    if not pid or not env or not shutil.which("xprop") or not shutil.which("xwininfo"):
+        return []
+    run_env = os.environ.copy()
+    run_env.update(env)
+    root = command(["xprop", "-root", "_NET_CLIENT_LIST"], check=False, env=run_env)
+    result = []
+    for wid in re.findall(r"0x[0-9a-fA-F]+", root.stdout):
+        prop = command(["xprop", "-id", wid, "_NET_WM_PID"], check=False, env=run_env)
+        if re.search(r"=\s*{}\s*$".format(pid), prop.stdout):
+            info = command(["xwininfo", "-id", wid, "-stats"], check=False, env=run_env)
+            if "Map State: IsViewable" in info.stdout:
+                result.append(wid)
+    return result
+
+
+def status(unit):
+    state = unit_state(unit)
+    path = state_path(unit)
+    record = read_state(path)
+    record = reconcile_record(state, record, path)
+    env = record["desktop"] if record and state.get("LoadState") != "not-found" else {}
+    pid = int(state.get("MainPID") or 0)
+    result = {"unit": unit, "load_state": state.get("LoadState"), "state": state.get("ActiveState"), "substate": state.get("SubState"), "result": state.get("Result"), "exit_status": state.get("ExecMainStatus"), "identity": process_identity(pid) if pid else None, "owned_pids": cgroup_pids(state), "mapped_windows": mapped_windows(pid, env), "visual_correctness": "not established by process/window status", "launch": record["spec"] if record else None, "phase": record["phase"] if record else None, "session": record["session"] if record else None, "desktop": {k: v for k, v in env.items() if k in ENV_KEYS}}
+    print(json.dumps(result, indent=2))
+    return result
+
+
+def require_matching_session(args, record):
+    if args.session is not None and args.session != record["session"]:
+        raise LaunchError("Existing instance belongs to session {}; requested session {} differs. Current instance unchanged.".format(record["session"], args.session))
+
+
+def reject_unmanaged(spec, owned):
+    found = unmanaged_instances(spec, owned)
+    if found:
+        raise LaunchError("Unmanaged matching application instance(s) {}; not adopted or stopped".format(found))
+
+
+def start(args, settings, previous=None):
+    unit = args.unit
+    state = unit_state(unit)
+    path = state_path(unit, create=True)
+    record = read_state(path)
+    record = reconcile_record(state, record, path)
+    live = cgroup_pids(state)
+    if state.get("ActiveState") in ("active", "activating", "deactivating") or live:
+        require_matching_session(args, record)
+        if state.get("ActiveState") != "active":
+            raise LaunchError("Existing unit has residual or non-active processes; inspect status/logs and stop it explicitly before starting")
+        requested = make_spec(args, settings, record["spec"])
+        require_matching_spec(record["spec"], requested)
+        reject_unmanaged(requested, set(live))
+        print("Already running; current settings unchanged.")
+        return status(unit)
+    spec = make_spec(args, settings, previous)
+    validate_spec(spec)
+    sid, env = desktop_environment(args.session)
+    unified_cgroup_mount()
+    reject_unmanaged(spec, set())
+    reset_failed = state.get("ActiveState") == "failed"
+    marker = secrets.token_hex(16)
+    record = {"version": 3, "unit": unit, "phase": "pending", "spec": spec, "desktop": env, "session": sid, "provenance": {"kind": "launch", "marker": marker}, "invocation_id": None, "identity": None}
+    # Durable intent precedes service creation, so an SSH interruption is recoverable.
+    save_state(path, record)
+    try:
+        if reset_failed:
+            command(["systemctl", "--user", "reset-failed", unit])
+        command(service_arguments(unit, spec, env, marker))
+        deadline = time.monotonic() + 5
+        windows = []
+        while True:
+            state = unit_state(unit)
+            record = reconcile_record(state, record, path)
+            if state.get("ActiveState") == "failed":
+                raise LaunchError("Application failed after launch; inspect link-displayctl logs")
+            if state.get("LoadState") == "not-found" or state.get("ActiveState") not in ("active", "activating"):
+                raise LaunchError("Application exited during startup; inspect logs")
+            # Invocation/process identity is persisted before potentially slow X11 observation.
+            pid = int(state.get("MainPID") or 0)
+            windows = mapped_windows(pid, env) if record["phase"] == "running" else []
+            if windows or time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+        state = unit_state(unit)
+        record = reconcile_record(state, record, path)
+        if state.get("ActiveState") != "active" or record["phase"] != "running":
+            raise LaunchError("Application did not reach a verified running process; inspect logs")
+    except (LaunchError, OSError, ValueError):
+        # systemd-run may have succeeded before its connection was lost. Reconcile
+        # only the matching marker; never adopt a name/description-only service.
+        try:
+            record = reconcile_record(unit_state(unit), record, path)
+        except (LaunchError, OSError, ValueError):
+            pass
+        record = dict(record, phase="failed")
+        save_state(path, record)
+        raise
+    print("Started independently of SSH. {} Visual correctness still requires inspection.".format("Mapped window observed." if windows else "No mapped window observed; process start only."))
+    return status(unit)
+
+
+def stop(unit, force=False):
+    state = unit_state(unit)
+    if state.get("LoadState") == "not-found":
+        print("Already stopped.")
+        return
+    path = state_path(unit)
+    record = reconcile_record(state, read_state(path), path)
+    live = cgroup_pids(state)
+    if state.get("ActiveState") in ("inactive", "failed") and not live:
+        print("Already stopped; retained failure information is available in logs.")
+        return
+    # Recheck provenance, invocation, process identity and policy immediately before
+    # each control operation, including a force request following a failed stop.
+    if force:
+        if not require_owned(unit_state(unit), record):
+            print("Already stopped.")
+            return
+        command(["systemctl", "--user", "kill", "--kill-who=all", "--signal=SIGKILL", unit])
+    if not require_owned(unit_state(unit), record):
+        print("Already stopped.")
+        return
+    error = ""
+    try:
+        result = command(["systemctl", "--user", "stop", unit], check=False, timeout=20)
+        if result.returncode:
+            error = (result.stderr or result.stdout).strip() or "systemctl stop failed"
+    except LaunchError as exc:
+        error = str(exc)
+    final = unit_state(unit)
+    require_owned(final, record)
+    if error or cgroup_pids(final) or (final.get("LoadState") != "not-found" and final.get("ActiveState") not in ("inactive", "failed")):
+        raise LaunchError("Stop did not complete cleanly; no automatic force kill. Inspect status/logs, then explicitly run link-displayctl stop --unit {} --force to SIGKILL only the verified owned service. {}".format(unit, error))
+    save_state(path, dict(record, phase="stopped"))
+    print("Stopped owned application; desktop and unrelated applications untouched.")
+
+
+def export_log(path, text):
+    try:
+        with Path(path).open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+    except OSError as exc:
+        raise LaunchError("Cannot create log export (existing files are never overwritten): " + str(exc)) from exc
+
+
+def logs(args):
+    argv = ["journalctl", "--user", "--unit=" + args.unit, "--no-pager", "--output=short-iso", "--lines=" + str(args.lines)]
+    if args.follow:
+        # Intentional attached log viewer; the application itself remains detached.
+        return subprocess.call(argv + ["--follow"])
+    text = command(argv).stdout
+    if args.export:
+        export_log(args.export, text)
+        print("Exported bounded unit logs to " + args.export)
+    else:
+        print(text, end="")
+    return 0
+
+
+def parser():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("action", choices=("doctor", "start", "status", "stop", "restart", "logs"))
+    p.add_argument("--project")
+    p.add_argument("--binary")
+    p.add_argument("--config")
+    p.add_argument("--settings")
+    p.add_argument("--unit", default="raspi-link-display.service")
+    p.add_argument("--session")
+    p.add_argument("--windowed", action="store_true", default=None)
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--lines", type=int, default=100)
+    p.add_argument("--follow", action="store_true")
+    p.add_argument("--export")
+    return p
+
+
+def validate_options(args):
+    validate_unit(args.unit)
+    if args.force and args.action != "stop":
+        raise LaunchError("--force is supported only for an explicit stop")
+    if args.follow and args.export:
+        raise LaunchError("--follow cannot be combined with --export")
+    if not 1 <= args.lines <= 5000:
+        raise LaunchError("--lines must be between 1 and 5000")
+    if (args.follow or args.export or args.lines != 100) and args.action != "logs":
+        raise LaunchError("Log options require the logs action")
+    if args.action in ("status", "stop", "logs") and any((args.project, args.binary, args.config, args.session, args.windowed)):
+        raise LaunchError("Launch options require doctor, start, or restart")
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    try:
+        if not sys.platform.startswith("linux"):
+            raise LaunchError("This desktop launcher requires Linux")
+        if os.getuid() == 0:
+            raise LaunchError("Run as the desktop user, not root")
+        validate_options(args)
+        if args.action == "logs":
+            return logs(args)
+        if args.action in ("status", "stop"):
+            # Lifecycle control is independent of optional/malformed launch bindings.
+            with lifecycle_lock(args.unit):
+                if args.action == "status":
+                    status(args.unit)
+                else:
+                    stop(args.unit, args.force)
+            return 0
+        default_settings = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "raspi-link-display/launcher.json"
+        settings = load_settings(Path(args.settings).expanduser() if args.settings is not None else default_settings, required=args.settings is not None)
+        if args.action == "doctor":
+            spec = make_spec(args, settings)
+            validate_spec(spec)
+            sid, env = desktop_environment(args.session)
+            unified_cgroup_mount()
+            state = unit_state(args.unit)
+            require_owned(state, read_state(state_path(args.unit)))
+            print(json.dumps({"project": spec, "session": sid, "desktop": env, "user_manager": "accessible", "unmanaged_instances": unmanaged_instances(spec, set(cgroup_pids(state))), "limits": "X11 and unified cgroup2 only; no boot autostart or logout/reboot survival; journal retention is host policy"}, indent=2))
+            return 0
+        with lifecycle_lock(args.unit):
+            previous = None
+            if args.action == "restart":
+                path = state_path(args.unit)
+                record = read_state(path)
+                previous = record["spec"] if record else None
+                # Validate replacement and conflicts BEFORE interrupting a healthy instance.
+                spec = make_spec(args, settings, previous)
+                validate_spec(spec)
+                desktop_environment(args.session)
+                unified_cgroup_mount()
+                state = unit_state(args.unit)
+                record = reconcile_record(state, record, path)
+                owned = set(cgroup_pids(state))
+                if record and (owned or state.get("ActiveState") in ("active", "activating", "deactivating")):
+                    require_matching_session(args, record)
+                reject_unmanaged(spec, owned)
+                stop(args.unit)
+            start(args, settings, previous)
+        return 0
+    except (LaunchError, OSError, ValueError) as exc:
+        print("link-displayctl: " + str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
