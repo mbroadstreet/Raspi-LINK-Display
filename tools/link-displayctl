@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Manual, same-user X11 desktop launcher. Python standard library only."""
 import argparse
+import functools
 import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -44,10 +46,10 @@ def validate_unit(name):
     return name
 
 
-def unit_state(unit):
+def unit_state(unit, *, deadline=None):
     args = ["systemctl", "--user", "show", "--all", unit]
     args += ["--property=" + key for key in UNIT_PROPERTIES]
-    result = command(args, check=False)
+    result = command(args, check=False, **({"timeout": bounded_remaining(deadline)} if deadline is not None else {}))
     state = properties(result.stdout)
     if result.returncode and state.get("LoadState") != "not-found":
         raise LaunchError("Cannot query user manager: " + (result.stderr or result.stdout).strip())
@@ -62,7 +64,7 @@ def unit_state(unit):
         )
         for name in ("ExecStop", "ExecStopPost"):
             if name not in state:
-                native = command(["busctl", "--user", "get-property", "org.freedesktop.systemd1", object_path, "org.freedesktop.systemd1.Service", name]).stdout.strip()
+                native = command(["busctl", "--user", "get-property", "org.freedesktop.systemd1", object_path, "org.freedesktop.systemd1.Service", name], **({"timeout": bounded_remaining(deadline)} if deadline is not None else {})).stdout.strip()
                 count = re.match(r"^a\([A-Za-z()]+\) ([0-9]+)(?:\s|$)", native)
                 if not count:
                     raise LaunchError("Cannot establish native stop-command array: " + name)
@@ -70,7 +72,7 @@ def unit_state(unit):
     return state
 
 
-def require_owned(state, record=None):
+def require_owned(state, record=None, *, observation_only=False):
     if state.get("LoadState") == "not-found":
         return False
     if state.get("Transient") != "yes" or state.get("Description") != DESCRIPTION:
@@ -102,7 +104,7 @@ def require_owned(state, record=None):
         identity = process_identity(pid)
         if not matches_process_identity(record, identity):
             raise LaunchError("Service process identity differs or cannot be verified")
-    elif state.get("ActiveState") == "active":
+    elif state.get("ActiveState") == "active" and not observation_only:
         raise LaunchError("Active service has no verifiable main process")
     return True
 
@@ -152,7 +154,7 @@ def unified_cgroup_mount():
         raise LaunchError("Cannot establish unified cgroup mount: " + str(exc)) from exc
 
 
-def cgroup_pids(state):
+def cgroup_pids(state, *, deadline=None):
     root = unified_cgroup_mount()
     if state.get("LoadState") == "not-found":
         return []
@@ -176,7 +178,9 @@ def cgroup_pids(state):
         def walk_error(exc):
             raise exc
         pids = set()
-        for directory, _, _ in os.walk(str(path), onerror=walk_error, followlinks=False):
+        for count, (directory, _, _) in enumerate(os.walk(str(path), onerror=walk_error, followlinks=False)):
+            if deadline is not None and (count > 4096 or time.monotonic() > deadline):
+                raise LaunchError("Cgroup observation budget exceeded")
             try:
                 pids.update(int(x) for x in (Path(directory) / "cgroup.procs").read_text().split())
             except FileNotFoundError:
@@ -557,26 +561,796 @@ def mapped_windows(pid, env):
         return []
     run_env = os.environ.copy()
     run_env.update(env)
-    root = command(["xprop", "-root", "_NET_CLIENT_LIST"], check=False, env=run_env)
+    deadline = time.monotonic() + 3
+    def remaining():
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise LaunchError("X11 observation budget exceeded")
+        return budget
+    root = command(["xprop", "-root", "_NET_CLIENT_LIST"], check=False, env=run_env, timeout=remaining())
     result = []
-    for wid in re.findall(r"0x[0-9a-fA-F]+", root.stdout):
-        prop = command(["xprop", "-id", wid, "_NET_WM_PID"], check=False, env=run_env)
+    for count, wid in enumerate(re.findall(r"0x[0-9a-fA-F]+", root.stdout)):
+        if count >= 256:
+            raise LaunchError("X11 client observation budget exceeded")
+        prop = command(["xprop", "-id", wid, "_NET_WM_PID"], check=False, env=run_env, timeout=remaining())
         if re.search(r"=\s*{}\s*$".format(pid), prop.stdout):
-            info = command(["xwininfo", "-id", wid, "-stats"], check=False, env=run_env)
+            info = command(["xwininfo", "-id", wid, "-stats"], check=False, env=run_env, timeout=remaining())
             if "Map State: IsViewable" in info.stdout:
                 result.append(wid)
     return result
 
 
-def status(unit):
-    state = unit_state(unit)
-    path = state_path(unit)
-    record = read_state(path)
-    record = reconcile_record(state, record, path)
+class ProcessDiscovery(list):
+    """Diagnostic candidates plus explicit global image-discovery limitations."""
+    def __init__(self):
+        super().__init__()
+        self.coverage = {"complete": True, "limitations": []}
+
+
+# Diagnostic-only reviewed invocation proof. NEVER consumed by control policy.
+BOUNDED_ELF = 'b8d48bc0a4609fa0ca77313094ccd3e45d1f661faefecc5edc8c3550490bc048'
+BOUNDED_BUILD_ROOT = '/home/pi/projects/link-desktop-native-readiness01-e7960860ee745b8da442c2f4b5ec564a'
+BOUNDED_SELECTION_SHA = 'a9bacdcb69f13bb53aaf0ccd11559022fb19cdf5a2d5ddda548b088eb23b133a'
+BOUNDED_RECEIPT_SHA = '35c5f3e228d6c80c7aa09baa23d3bec65cdba99cecdc5d6cd2589b37e17bca32'
+BOUNDED_PROFILE = 'native-proof-binding01-bullseye-x11'
+BOUNDED_MAX = 16384
+
+
+def bounded_remaining(deadline):
+    budget = deadline - time.monotonic()
+    if budget <= 0:
+        raise LaunchError('Bounded diagnostic deadline exceeded')
+    return budget
+
+
+def bounded_canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('ascii')
+
+
+def bounded_digest(value):
+    return hashlib.sha256(bounded_canonical(value)).hexdigest()
+
+
+def bounded_binding(record):
+    validate_record(record)
+    i = record['identity']
+    if record['provenance']['kind'] != 'launch' or i is None or record['invocation_id'] is None:
+        raise ValueError('No genuine captured invocation')
+    for value, bits, minimum in [(i['pid'],31,1),(int(i['start_ticks']),64,1),(i['exe_device'],64,0),(i['exe_inode'],64,1)]:
+        if type(value) is not int or not minimum <= value < 2**bits:
+            raise ValueError('Identity outside native widths')
+    return bounded_digest({k:v for k,v in record.items() if k != 'phase'})
+
+
+@functools.lru_cache(maxsize=1)
+def bounded_validate_build(selection_raw, receipt_raw):
+    """Authenticate exact accepted provenance before consuming any declared digest.
+
+    Cache only immutable byte arguments, never a path, metadata-only result or
+    caller-supplied runtime hash. Both files are reacquired on every use below.
+    """
+    if (type(selection_raw) is not bytes or type(receipt_raw) is not bytes
+            or hashlib.sha256(selection_raw).hexdigest() != BOUNDED_SELECTION_SHA
+            or hashlib.sha256(receipt_raw).hexdigest() != BOUNDED_RECEIPT_SHA):
+        raise ValueError('Unaccepted selected-build evidence')
+    m = json.loads(selection_raw); r = json.loads(receipt_raw)
+    root = BOUNDED_BUILD_ROOT
+    expected = {n:v['sha256'] for n,v in m['product_files'].items()}
+    expected.update({m['dependency_relative']+'/'+n:v['sha256'] for n,v in m['dependencies'].items()})
+    if (m['root'] != root or m['candidate'] != 'frozen-private-D9-session03'
+            or m['build_relative'] != 'candidate-build-session03'
+            or m['dependency_relative'] != 'candidate-dependencies-session03'
+            or r['completed'] is not True or r['root'] != root
+            or r['candidate'] != m['candidate'] or r['selection_sha256'] != BOUNDED_SELECTION_SHA
+            or r['source'] != root+'/source' or r['build'] != root+'/'+m['build_relative']
+            or r['dependency'] != root+'/'+m['dependency_relative']+'/link'
+            or r['binary']['sha256'] != BOUNDED_ELF
+            or r['inputs_before'] != expected or r['inputs_after'] != expected
+            or r['expected_inputs'] != expected
+            or r['configure_argv'] != ['/usr/bin/cmake','-S',r['source'],'-B',r['build'],'-DLINK_ROOT='+r['dependency']]+m['configure_suffix']
+            or r['build_argv'] != ['/usr/bin/cmake','--build',r['build']]+m['build_suffix']):
+        raise ValueError('Invalid selected native build association')
+    return (r['binary']['sha256'], BOUNDED_SELECTION_SHA, BOUNDED_RECEIPT_SHA,
+            r['build']+'/link-pi-display', r['source'], root+'/profile.conf')
+
+
+def bounded_build_evidence(deadline=None):
+    """Read only fixed private evidence paths; no CLI/environment/hash override."""
+    if deadline is None:
+        deadline = time.monotonic()+1
+    values = []
+    with bounded_directory(Path(BOUNDED_BUILD_ROOT)/'evidence') as directory:
+        for name in ('BUILD-SELECTION.json','native-build-success.json'):
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=directory)
+            try:
+                before = bounded_file_metadata(os.fstat(fd))
+                raw = bounded_read_fd(fd, 2*1024*1024, deadline)
+                if (before != bounded_file_metadata(os.fstat(fd))
+                        or before != bounded_file_metadata(os.stat(name,dir_fd=directory,follow_symlinks=False))):
+                    raise ValueError('Selected build evidence changed during read')
+                values.append(raw)
+            finally:
+                os.close(fd)
+    selected = bounded_validate_build(*values)
+    bounded_remaining(deadline)
+    return selected
+
+
+def bounded_build_binding(selected):
+    return bounded_digest({'elf_sha256':selected[0], 'selection_sha256':selected[1],
+                           'receipt_sha256':selected[2], 'binary':selected[3],
+                           'project':selected[4], 'config':selected[5]})
+
+
+def bounded_decode(raw, deadline=None):
+    if type(raw) is not bytes or len(raw) > BOUNDED_MAX:
+        raise ValueError('Invalid proof size/type')
+    def pairs(items):
+        value = {}
+        for k,v in items:
+            if k in value:
+                raise ValueError('Duplicate proof key')
+            value[k] = v
+        return value
+    try:
+        obj = json.loads(raw.decode('ascii'), object_pairs_hook=pairs)
+    except RecursionError as exc:
+        raise ValueError('Excessively nested proof') from exc
+    if type(obj) is not dict or set(obj) != {'body','checksum'} or type(obj['body']) is not dict:
+        raise ValueError('Invalid proof envelope')
+    b = obj['body']
+    selected = bounded_build_evidence(deadline)
+    if (set(b) != {'version','profile','elf_sha256','boot','uid','record_binding','build_binding'}
+            or type(b['version']) is not int or b['version'] != 2
+            or b['profile'] != BOUNDED_PROFILE or b['elf_sha256'] != selected[0]
+            or b['build_binding'] != bounded_build_binding(selected)
+            or type(b['uid']) is not int or not 0 <= b['uid'] < 2**32
+            or type(b['boot']) is not str or re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',b['boot']) is None
+            or type(b['record_binding']) is not str or re.fullmatch(r'[0-9a-f]{64}',b['record_binding']) is None
+            or obj['checksum'] != bounded_digest(b)):
+        raise ValueError('Invalid bounded proof')
+    return b
+
+
+def bounded_read_fd(fd, cap, deadline):
+    chunks, length = [], 0
+    while True:
+        bounded_remaining(deadline)
+        chunk = os.read(fd, min(65536, cap + 1 - length))
+        if not chunk:
+            return b''.join(chunks)
+        chunks.append(chunk)
+        length += len(chunk)
+        if length > cap:
+            raise ValueError('Bounded native read overflow')
+
+
+def bounded_read_at(directory, name, cap, deadline):
+    fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=directory)
+    try:
+        return bounded_read_fd(fd,cap,deadline)
+    finally:
+        os.close(fd)
+
+
+def bounded_status_row(raw, label):
+    """Only numeric status rows are ASCII; kernel Name bytes are unrelated."""
+    if not isinstance(raw,(bytes,str)) or len(raw) > 65536:
+        raise ValueError('Process status overflow or invalid input')
+    prefix = label.encode('ascii') if isinstance(raw,bytes) else label
+    newline = b'\n' if isinstance(raw,bytes) else '\n'
+    rows = [r for r in raw.split(newline) if r.startswith(prefix)]
+    if len(rows) != 1:
+        raise ValueError('Missing or duplicate process status row')
+    row = rows[0].removesuffix(b'\r' if isinstance(raw,bytes) else '\r')
+    return row.decode('ascii') if isinstance(raw,bytes) else row.encode('ascii').decode('ascii')
+
+
+def bounded_uids(raw):
+    row = bounded_status_row(raw,'Uid:')
+    if not re.fullmatch(r'Uid:[ \t]+[0-9]+[ \t]+[0-9]+[ \t]+[0-9]+[ \t]+[0-9]+[ \t]*',row):
+        raise ValueError('Unreadable process UID tuple')
+    values = tuple(int(v) for v in row.split()[1:])
+    if any(v >= 2**32 for v in values) or len(set(values)) != 1:
+        raise ValueError('Mixed or invalid process UID tuple')
+    return values
+
+
+def bounded_stat(text, pid):
+    if len(text) > 8192 or not text.startswith(str(pid)+' ('):
+        raise ValueError('Invalid native stat')
+    tail = text.rsplit(')',1)[1].split()
+    if len(tail) < 20 or tail[0] not in tuple('RSDZTtWXxIKP') or not re.fullmatch(r'[1-9][0-9]*',tail[19]) or int(tail[19]) >= 2**64:
+        raise ValueError('Invalid native stat fields')
+    return tail[19]
+
+
+def bounded_platform(deadline):
+    """The fixed profile is stock Bullseye, not every Linux loader/API stack."""
+    import stat
+    path = Path('/etc/os-release').resolve(strict=True)
+    for part in (path,)+tuple(path.parents):
+        info = part.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('Unsupported OS custody')
+    fd = os.open(str(path),os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('Unsupported OS release file')
+        text = bounded_read_fd(fd,8192,deadline).decode('ascii')
+    finally:
+        os.close(fd)
+    release = {}
+    for row in text.splitlines():
+        if row and not row.startswith('#'):
+            key,value = row.split('=',1)
+            if key in release:
+                raise ValueError('Ambiguous OS release')
+            release[key] = shlex.split(value)
+    if release.get('ID') not in (['raspbian'],['debian']) or release.get('VERSION_ID') != ['11']:
+        raise ValueError('Only reviewed stock Bullseye API profile is eligible')
+
+
+def bounded_context(deadline):
+    """Observable ordinary proc view only; no privileged host/PID1 anchor."""
+    import ctypes
+    if not sys.platform.startswith('linux') or PROC_ROOT != Path('/proc') or not 0 < os.getuid() < 2**32:
+        raise ValueError('Unsupported proc context')
+    bounded_platform(deadline)
+    fd = os.open('/proc',os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        # statfs ABI buffer deliberately oversized for Linux 32/64-bit layouts.
+        buf = ctypes.create_string_buffer(256)
+        libc = ctypes.CDLL(None,use_errno=True)
+        if libc.fstatfs(fd,ctypes.byref(buf)) != 0 or ctypes.c_long.from_buffer(buf).value != 0x9fa0:
+            raise ValueError('Not native procfs')
+        pid = os.getpid()
+        if os.readlink('self',dir_fd=fd) != str(pid):
+            raise ValueError('Remapped proc self')
+        status = bounded_read_at(fd,str(pid)+'/status',65536,deadline)
+        bounded_uids(status)
+        if bounded_uids(status) != (os.getuid(),)*4:
+            raise ValueError('Unsupported helper credentials')
+        nsrow = bounded_status_row(status,'NSpid:')
+        if re.fullmatch(r'NSpid:[ \t]+'+str(pid)+r'[ \t]*',nsrow) is None:
+            raise ValueError('Nested or unavailable PID namespace')
+        bounded_stat(bounded_read_at(fd,str(pid)+'/stat',8192,deadline).decode(),pid)
+        uidmap = bounded_read_at(fd,str(pid)+'/uid_map',8192,deadline).split()
+        if uidmap != [b'0',b'0',b'4294967295']:
+            raise ValueError('Remapped user namespace')
+        namespaces = tuple(os.readlink(str(pid)+'/ns/'+n,dir_fd=fd) for n in ('pid','pid_for_children','user','mnt'))
+        if namespaces[0] != namespaces[1]:
+            raise ValueError('Unshared child PID namespace')
+        mounts = bounded_read_at(fd,str(pid)+'/mountinfo',1048576,deadline).decode().splitlines()
+        proc, auxiliary = [], {}
+        for row in mounts:
+            left,right = row.split(' - ',1)
+            a,b = left.split(),right.split()
+            if len(a) < 6 or len(b) != 3:
+                raise ValueError('Malformed proc mount metadata')
+            # Decode only for classification; never accept an encoded proc path.
+            point = re.sub(r'\\([0-7]{3})',lambda m:chr(int(m[1],8)),a[4])
+            relevant = b[0] == 'proc' or point == '/proc' or point.startswith(('/proc/','/proc\\'))
+            if not relevant:
+                continue
+            if (not all(re.fullmatch(r'[1-9][0-9]*',x) for x in a[:2])
+                    or re.fullmatch(r'[0-9]+:[0-9]+',a[2]) is None
+                    or any(not x.startswith('/') or '\\' in x or '//' in x
+                           or any(p in ('.','..') for p in x.split('/')) for x in a[3:5])):
+                raise ValueError('Malformed proc mount metadata')
+            options = (a[5]+','+b[2]).split(',')
+            if (any(not x for x in options)
+                    or any(x.startswith(('hidepid=','subset=')) and x not in ('hidepid=0','subset=all') for x in options)):
+                raise ValueError('Redacted or remounted proc view')
+            if b[0] == 'proc':
+                if a[3:5] != ['/','/proc']:
+                    raise ValueError('Redacted or remounted proc view')
+                proc.append(row)
+            elif (a[3:5] == ['/','/proc/sys/fs/binfmt_misc']
+                    and b[0] in ('autofs','binfmt_misc') and b[0] not in auxiliary):
+                # Standard disjoint auxiliary subtree: no PID/self/ns/boot read
+                # traverses it. Permit its automount and mounted forms only.
+                auxiliary[b[0]] = row
+            else:
+                raise ValueError('Overmounted proc view')
+        if len(proc) != 1:
+            raise ValueError('Ambiguous proc view')
+        boot = bounded_read_at(fd,'sys/kernel/random/boot_id',64,deadline).decode('ascii').strip()
+        if re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',boot) is None:
+            raise ValueError('Invalid boot context')
+        bounded_remaining(deadline)
+        return (boot,os.getuid(),namespaces,tuple(proc+list(auxiliary.values())),os.fstat(fd).st_dev)
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def bounded_directory(path):
+    """Open existing trusted ancestors without following any symlink; never mkdir."""
+    import stat
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError('Invalid proof directory')
+    fd = os.open('/',os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        parts = path.parts[1:]
+        for part in (None,)+parts:
+            if part is not None:
+                new = os.open(part,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,dir_fd=fd)
+                os.close(fd); fd = new
+            s = os.fstat(fd)
+            if not stat.S_ISDIR(s.st_mode) or s.st_uid not in (0,os.getuid()) or s.st_mode & 0o022:
+                raise ValueError('Unsafe proof ancestor')
+        if s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o700:
+            raise ValueError('Proof directory must be owned private0700')
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def bounded_file_metadata(s):
+    import stat
+    if not stat.S_ISREG(s.st_mode) or s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o600 or s.st_nlink != 1:
+        raise ValueError('Unsafe proof file')
+    return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+
+
+def bounded_file_read(directory, name, deadline):
+    fd = os.open(name,os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,dir_fd=directory)
+    try:
+        before = bounded_file_metadata(os.fstat(fd))
+        raw = bounded_read_fd(fd,BOUNDED_MAX,deadline)
+        if before != bounded_file_metadata(os.fstat(fd)) or before != bounded_file_metadata(os.stat(name,dir_fd=directory,follow_symlinks=False)):
+            raise ValueError('Proof changed during read')
+        bounded_decode(raw, deadline=deadline)
+        return raw,before
+    finally:
+        os.close(fd)
+
+
+def bounded_proof_read(path, unit, deadline):
+    validate_unit(unit)
+    with bounded_directory(path.parent) as fd:
+        return bounded_file_read(fd,unit+'.bounded-proof.json',deadline)
+
+
+def bounded_publish(path, unit, raw, deadline):
+    validate_unit(unit); bounded_decode(raw, deadline=deadline)
+    name = unit+'.bounded-proof.json'
+    with bounded_directory(path.parent) as directory:
+        try:
+            bounded_file_metadata(os.stat(name,dir_fd=directory,follow_symlinks=False))
+        except FileNotFoundError:
+            pass
+        temp = '.bounded-'+secrets.token_hex(16)
+        fd = os.open(temp,os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,0o600,dir_fd=directory)
+        published = False
+        try:
+            created = bounded_file_metadata(os.fstat(fd))
+            position = 0
+            while position < len(raw):
+                bounded_remaining(deadline)
+                count = os.write(fd,raw[position:])
+                if count <= 0:
+                    raise ValueError('Short proof write')
+                position += count
+            os.fsync(fd)
+            bounded_remaining(deadline)
+            os.rename(temp,name,src_dir_fd=directory,dst_dir_fd=directory)
+            published = True
+            os.fsync(directory)
+            if bounded_file_read(directory,name,deadline)[0] != raw:
+                raise ValueError('Proof publication readback changed')
+        except (OSError, ValueError, LaunchError):
+            if published:
+                # Remove only our exact newly published inode on failed readback,
+                # never a predecessor/collision or another writer's replacement.
+                try:
+                    if bounded_file_metadata(os.stat(name,dir_fd=directory,follow_symlinks=False))[:2] == created[:2]:
+                        os.unlink(name,dir_fd=directory)
+                except (FileNotFoundError, ValueError):
+                    pass
+            raise
+        finally:
+            os.close(fd)
+            try:
+                os.unlink(temp,dir_fd=directory)
+            except FileNotFoundError:
+                pass
+
+
+def bounded_environment(raw, record):
+    if not raw or len(raw) > 65536 or not raw.endswith(b'\0'):
+        raise ValueError('Incomplete native environment')
+    values = {}
+    for entry in raw[:-1].split(b'\0'):
+        if b'=' not in entry:
+            raise ValueError('Malformed native environment')
+        k,v = entry.split(b'=',1)
+        key = k.decode('ascii')
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',key) or key in values:
+            raise ValueError('Malformed/duplicate environment key')
+        # Never expose arbitrary environment values in diagnostics or sidecar.
+        values[key] = v
+        if key.startswith(('LD_','SDL_','LIBGL_','MESA_','GALLIUM_','EGL_','GBM_','__GL_','__EGL_')) and key != 'SDL_VIDEODRIVER':
+            raise ValueError('Unsupported loader/graphics environment')
+    expected = {k:os.fsencode(v) for k,v in record['desktop'].items()}
+    if ({k:v for k,v in values.items() if k in ENV_KEYS} != expected
+            or values.get('SDL_VIDEODRIVER') != b'x11'
+            or values.get(MARKER_KEY) != record['provenance']['marker'].encode('ascii')):
+        raise ValueError('Native desktop/launch environment differs')
+    return {k:values[k] for k in ENV_KEYS | {MARKER_KEY,'SDL_VIDEODRIVER'} if k in values}
+
+
+def bounded_process(directory, record, deadline):
+    i = record['identity']; pid = i['pid']
+    ticks = bounded_stat(bounded_read_at(directory,'stat',8192,deadline).decode(),pid)
+    uids = bounded_uids(bounded_read_at(directory,'status',65536,deadline))
+    if ticks != i['start_ticks'] or uids != (os.getuid(),)*4:
+        raise ValueError('Native identity/credentials differ')
+    rawlink = os.readlink('exe',dir_fd=directory)
+    if len(os.fsencode(rawlink)) > 4096 or rawlink != i['executable'] or rawlink != record['spec']['binary'] or i['exe_unlinked']:
+        raise ValueError('Not exact linked application')
+    argv = bounded_read_at(directory,'cmdline',16384,deadline)
+    expected = [record['spec']['binary'],'--config',record['spec']['config']]+(['--windowed'] if record['spec']['windowed'] else [])
+    if argv != b'\0'.join(os.fsencode(a) for a in expected)+b'\0':
+        raise ValueError('Native application argv differs')
+    env = bounded_environment(bounded_read_at(directory,'environ',65536,deadline),record)
+    namespaces = tuple(os.readlink('ns/'+n,dir_fd=directory) for n in ('pid','pid_for_children','user','mnt'))
+    return ticks,uids,rawlink,argv,env,namespaces
+
+
+def bounded_image(s):
+    import stat
+    if not stat.S_ISREG(s.st_mode) or s.st_nlink < 1 or not 0 < s.st_size <= 2*1024*1024:
+        raise ValueError('Unsupported native image')
+    return (s.st_dev,s.st_ino,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+
+
+def capture_bounded_proof(unit, record, path):
+    """Optional genuine-start diagnostic. Caller already holds lifecycle lock.
+
+    Refusal cannot affect lifecycle or authorize any signal/adoption. The ELF
+    filter is only a cheap skip; the defining digest is of the live kernel FD.
+    """
+    try:
+        bounded_binding(record)
+        if record['phase'] != 'running' or record['identity']['executable'] != record['spec']['binary']:
+            return False
+        deadline = time.monotonic()+1
+        accepted = bounded_build_evidence(deadline)
+        if record['spec'] != {'binary':accepted[3],'project':accepted[4],'config':accepted[5],'windowed':False}:
+            return False
+        selected = os.open(record['spec']['binary'],os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            if os.read(selected,4) != b'\x7fELF':
+                return False
+        finally:
+            os.close(selected)
+        context = bounded_context(deadline)
+        before = unit_state(unit,deadline=deadline)
+        if read_state(path) != record or not require_owned(before,record,observation_only=True) or before.get('ActiveState') != 'active' or before.get('MainPID') != str(record['identity']['pid']):
+            return False
+        group = cgroup_pids(before,deadline=deadline)
+        if record['identity']['pid'] not in group:
+            return False
+        directory = os.open(str(PROC_ROOT/str(record['identity']['pid'])),os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            facts = bounded_process(directory,record,deadline)
+            if facts[-1] != context[2]:
+                return False
+            image = os.open('exe',os.O_RDONLY | os.O_CLOEXEC,dir_fd=directory)
+            try:
+                metadata = bounded_image(os.fstat(image))
+                if metadata[:2] != (record['identity']['exe_device'],record['identity']['exe_inode']):
+                    return False
+                sha = hashlib.sha256(bounded_read_fd(image,2*1024*1024,deadline)).hexdigest()
+                reopened = os.open('exe',os.O_RDONLY | os.O_CLOEXEC,dir_fd=directory)
+                try:
+                    if bounded_image(os.fstat(reopened)) != metadata or bounded_image(os.fstat(image)) != metadata:
+                        return False
+                finally:
+                    os.close(reopened)
+                if sha != accepted[0] or bounded_process(directory,record,deadline) != facts:
+                    return False
+                if (unit_state(unit,deadline=deadline) != before or cgroup_pids(before,deadline=deadline) != group
+                        or read_state(path) != record or bounded_context(deadline) != context):
+                    return False
+                if bounded_process(directory,record,deadline) != facts or bounded_image(os.fstat(image)) != metadata:
+                    return False
+                final_image = os.open('exe',os.O_RDONLY | os.O_CLOEXEC,dir_fd=directory)
+                try:
+                    if bounded_image(os.fstat(final_image)) != metadata:
+                        return False
+                finally:
+                    os.close(final_image)
+                bounded_remaining(deadline)
+                body = {'version':2,'profile':BOUNDED_PROFILE,'elf_sha256':accepted[0],'boot':context[0],
+                        'uid':os.getuid(),'record_binding':bounded_binding(record),
+                        'build_binding':bounded_build_binding(accepted)}
+                bounded_publish(path,unit,bounded_canonical({'body':body,'checksum':bounded_digest(body)}),deadline)
+                return True
+            finally:
+                os.close(image)
+        finally:
+            os.close(directory)
+    except (OSError,ValueError,IndexError,KeyError,TypeError,AttributeError,LaunchError):
+        return False
+
+
+def bounded_absence(identity, deadline):
+    reads = []
+    for _ in range(2):
+        bounded_remaining(deadline)
+        try:
+            fd = os.open(str(PROC_ROOT/str(identity['pid'])),os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        except FileNotFoundError:
+            reads.append(None)  # ONLY numeric directory-open ENOENT is absence.
+            continue
+        try:
+            text = bounded_read_at(fd,'stat',8192,deadline).decode()
+            ticks = bounded_stat(text,identity['pid'])
+            if text.rsplit(')',1)[1].split()[0] == 'Z':
+                raise ValueError('Zombie is not absence evidence')
+            # Require a stable inner stat before releasing each pinned directory.
+            closing = bounded_read_at(fd,'stat',8192,deadline).decode()
+            if bounded_stat(closing,identity['pid']) != ticks or closing.rsplit(')',1)[1].split()[0] == 'Z':
+                raise ValueError('PID changed during absence read')
+            reads.append(ticks)
+        finally:
+            os.close(fd)
+    if reads[0] != reads[1] or reads[0] == identity['start_ticks']:
+        raise ValueError('Original process absence unproved')
+    return tuple(reads)
+
+
+def bounded_snapshot(unit, record):
+    """Read-only: missing custody/proc facts remain unavailable, never backfilled."""
+    try:
+        bounded_binding(record)
+        deadline = time.monotonic()+1
+        raw,metadata = bounded_proof_read(state_path(unit),unit,deadline)
+        context = bounded_context(deadline)
+        proof = bounded_decode(raw, deadline=deadline)
+        if proof['record_binding'] != bounded_binding(record) or proof['boot'] != context[0] or proof['uid'] != context[1]:
+            return None
+        absence = bounded_absence(record['identity'],deadline)
+        if bounded_context(deadline) != context:
+            return None
+        return raw,metadata,context,absence
+    except (OSError,ValueError,IndexError,KeyError,TypeError,AttributeError,LaunchError):
+        return None
+
+
+
+def observation_processes(unit, record, owned):
+    """Strict, bounded same-user scan. Diagnostic evidence NEVER grants control.
+
+    Inspect membership even after systemd forgets the group. A unit-named
+    survivor without native ownership is a conflict, not an adopted child.
+    Unlike the legacy control scan, unreadable same-user facts are not absence.
+    """
+    deadline = time.monotonic() + 3
+    found = ProcessDiscovery()
+    try:
+        for count, p in enumerate(PROC_ROOT.iterdir()):
+            if count > 65536 or time.monotonic() > deadline:
+                raise LaunchError("Process observation budget exceeded")
+            if not p.name.isdigit():
+                continue
+            try:
+                # Observation selection uses all four status UIDs, never directory owner.
+                def credentials():
+                    with (p / 'status').open('rb') as stream:
+                        raw = stream.read(65537)
+                    if len(raw) > 65536:
+                        raise ValueError('Process status overflow')
+                    return bounded_uids(raw)
+                uids = credentials()
+                if uids != (os.getuid(),)*4:
+                    if int(p.name) in owned or (record and record['identity'] and record['identity']['pid'] == int(p.name)):
+                        raise LaunchError('Relevant process credentials differ')
+                    if credentials() != uids:
+                        raise LaunchError('Process credentials changed during exclusion')
+                    continue
+                stat_text = (p / "stat").read_text()
+                # Reaped zombies cannot retain a runtime or executable.
+                if stat_text.rsplit(")", 1)[1].split()[0] == "Z":
+                    if credentials() != uids:
+                        raise LaunchError('Zombie credentials changed')
+                    continue
+                membership = (p / "cgroup").read_text().splitlines()
+                if len(membership) != 1 or not membership[0].startswith("0::/"):
+                    raise LaunchError("Unsupported process cgroup membership")
+                argv = (p / "cmdline").read_bytes().split(b"\0")
+                pid = int(p.name)
+                group_match = unit in membership[0][3:].split("/")
+                binary = Path(record["spec"]["binary"]) if record else Path("link-pi-display")
+                comm = stat_text.split("(", 1)[1].rsplit(")", 1)[0]
+                recorded_pid = record and record["identity"] and record["identity"]["pid"] == pid
+                command_match = any(Path(os.fsdecode(a)).name == binary.name for a in argv[:2] if a)
+                # Relevance is NOT ownership. Empty argv/comm is ambiguous; Linux
+                # comm may truncate the binary name to 15 bytes. PID reuse cannot
+                # excuse denial at a recorded PID. All such cases stay strict.
+                relevant = (pid in owned or recorded_pid or group_match or command_match
+                            or not any(argv) or not comm or comm == binary.name[:15])
+                identity = process_identity(pid)
+                if identity is None:
+                    # process_identity deliberately collapses failures for control
+                    # callers. Only a positively observed exe PermissionError can
+                    # become a coverage limitation, never churn or generic failure.
+                    try:
+                        (p / "exe").stat()
+                        os.readlink(str(p / "exe"))
+                    except PermissionError:
+                        if relevant:
+                            raise LaunchError("Cannot inspect native candidate identity for PID " + p.name)
+                        if (start_ticks((p / "stat").read_text()) != start_ticks(stat_text)
+                                or (p / "cgroup").read_text().splitlines() != membership
+                                or (p / "cmdline").read_bytes().split(b"\0") != argv):
+                            raise LaunchError("Process changed during discovery: " + p.name)
+                        if credentials() != uids:
+                            raise LaunchError('Process credentials changed during discovery')
+                        found.coverage["complete"] = False
+                        found.coverage["limitations"].append({"pid": pid, "reason": "Executable permission denied for discovery-unrelated process; hidden image conflict not excluded"})
+                        continue
+                    raise LaunchError("Cannot inspect native identity for PID " + p.name)
+                if start_ticks(stat_text) != identity["start_ticks"]:
+                    raise LaunchError("Process changed during observation: " + p.name)
+                if credentials() != uids:
+                    raise LaunchError('Process credentials changed during observation')
+                if pid in owned:
+                    continue
+                pinned = record and record["identity"] and same_executable_identity(record["identity"], identity)
+                raw = identity["executable"]
+                # Strip exactly one kernel annotation only for an unlinked inode.
+                image = raw[:-10] if identity["exe_unlinked"] and raw.endswith(" (deleted)") else raw
+                match = Path(image).name == binary.name or any(Path(os.fsdecode(a)).name == binary.name for a in argv[:2] if a)
+                if pinned or group_match or match:
+                    found.append({"pid": pid, "kind": "owned" if pinned else "conflict"})
+            except FileNotFoundError:
+                # Only a disappeared PID is a benign race; denied/live reads fail.
+                if p.exists():
+                    raise LaunchError("Incomplete process observation for PID " + p.name)
+        return found
+    except (LaunchError, OSError, ValueError, IndexError) as exc:
+        found.coverage['complete'] = False
+        found.coverage['limitations'].append({'reason':'Required process selection/read incomplete'})
+        error = LaunchError("Cannot complete native process observation: " + str(exc))
+        error.discovery = found
+        raise error from exc
+
+
+def observe(unit):
+    """Collect a read-only view; stored phase and V3 bytes are historical.
+
+    Unknown facts are null, not empty absence. Two native manager snapshots and
+    main-image reads bracket collection; no save/reconcile or lifecycle action.
+    """
+    state, record, identity, live, windows = {}, None, None, None, []
+    liveness, reasons, issues, unavailable = "unknown", [], [], []
+    ownership, scanned = "unverified", None
+    coverage = {"complete": False, "limitations": [{"reason": "Process discovery did not complete"}]}
+    gui = "unknown"
+    claim_scope, invocation_proof = None, None
+    try:
+        state = unit_state(unit)
+        record = read_state(state_path(unit))
+        proof_open = bounded_snapshot(unit, record)
+        pid = int(state.get("MainPID") or 0)
+        identity = process_identity(pid) if pid else None
+        if pid and identity is None:
+            raise LaunchError("Cannot inspect main process identity")
+        try:
+            # MainPID=0 is a control refusal, but diagnostic collection must still
+            # inspect authenticated cgroup survivors. Every policy/marker and
+            # invocation check remains mandatory; control callers use the default.
+            authenticated = require_owned(state, record, observation_only=True)
+        except LaunchError as exc:
+            if (str(exc) == "Service process identity differs or cannot be verified"
+                    and record and matches_process_identity(record, identity)):
+                raise LaunchError("Main identity changed or became unreadable during native ownership observation") from exc
+            liveness = "foreign/conflicting"
+            reasons.append(str(exc))
+            authenticated = False
+        # A vanished unit must not shortcut native cgroup/proc inspection.
+        group_state = state
+        if state.get("LoadState") == "not-found" and record and record["provenance"]["kind"] == "verified-legacy":
+            group_state = dict(state, LoadState="loaded", ControlGroup=record["provenance"]["control_group"])
+        live = cgroup_pids(group_state, deadline=time.monotonic() + 3)
+        try:
+            scanned = observation_processes(unit, record, set(live) if authenticated else set())
+        except LaunchError as exc:
+            partial = getattr(exc, 'discovery', None)
+            if partial is not None and any(p['kind'] == 'conflict' for p in partial):
+                scanned = partial
+                coverage = partial.coverage
+                liveness = 'foreign/conflicting'
+            raise
+        coverage = getattr(scanned, "coverage", {"complete": True, "limitations": []})
+        if not coverage["complete"]:
+            unavailable.append("conflict_discovery")
+        if liveness != "foreign/conflicting":
+            if any(p["kind"] == "conflict" for p in scanned):
+                liveness = "foreign/conflicting"
+                reasons.append("Unmanaged or unverified residual process conflicts with this launch")
+            elif any(p["kind"] == "owned" for p in scanned) or (authenticated and live and (not pid or state.get("ActiveState") not in ("active", "activating", "deactivating"))):
+                liveness = "residual-process"
+            elif state.get("ActiveState") in ("activating", "deactivating"):
+                liveness = "transitional"
+            elif authenticated and state.get("ActiveState") == "active":
+                if not pid or pid not in live:
+                    raise LaunchError("Main process lacks verified cgroup membership")
+                liveness = "transitional" if launch_wrapper(record, identity) else "running"
+            elif state.get("LoadState") == "not-found" or state.get("ActiveState") in ("inactive", "failed"):
+                if live:
+                    raise LaunchError("Cannot attribute residual cgroup processes")
+                liveness = "stopped"
+            else:
+                raise LaunchError("Native service state is incomplete or unsupported")
+        if liveness != "foreign/conflicting" and (authenticated or any(p["kind"] == "owned" for p in scanned)):
+            ownership = "verified"
+        live = sorted(set(live) | {p["pid"] for p in scanned if p["kind"] == "owned"})
+        # Close diagnostic proof/proc/boot first, then native manager and FULL
+        # record so a mutation during those acquisitions cannot bypass policy.
+        proof_close = bounded_snapshot(unit, record)
+        final_state = unit_state(unit)
+        final_identity = process_identity(pid) if pid else None
+        final_record = read_state(state_path(unit))
+        changed = final_state != state or (pid and final_identity != identity) or final_record != record
+        if liveness == 'stopped':
+            # Final bounded policy must follow EVERY closing fact. Old complete
+            # image scanning cannot upgrade a custom/legacy/missing-proof launch.
+            if changed or proof_open is None or proof_close != proof_open:
+                raise LaunchError('No stable captured reviewed-invocation absence proof')
+            if int(state.get('MainPID','-1')) != 0 or (state.get('LoadState') == 'not-found' and
+                    (state.get('Id') != unit or state.get('ActiveState') != 'inactive')):
+                raise LaunchError('Not a settled exact native unit')
+            ownership = 'unverified'  # Diagnostic custody is never control authority.
+            claim_scope = 'recorded exact-app invocation only'
+            invocation_proof = 'verified-bounded-diagnostic'
+            reasons.append('Captured reviewed invocation and trustworthy original-process absence under no-delegation model')
+        elif changed and liveness != 'foreign/conflicting':
+            liveness = 'transitional'
+            reasons.append('Native snapshot changed during observation; retry')
+        # Preserve protected R1/P4 closing policy for all non-bounded outcomes.
+        if not coverage["complete"] and liveness not in ("running", "foreign/conflicting", "stopped"):
+            raise LaunchError("Incomplete conflict discovery cannot establish stopped, residual or transitional liveness")
+        env = record["desktop"] if record and state.get("LoadState") != "not-found" else {}
+        if pid and env:
+            try:
+                windows = mapped_windows(pid, env)
+                # Window tools cannot establish rendered correctness.
+                gui = "mapped" if windows else "unknown"
+            except LaunchError as exc:
+                issues.append("GUI observation: " + str(exc))
+        if gui == "unknown":
+            unavailable.append("gui_readiness")
+    except (LaunchError, OSError, ValueError) as exc:
+        # A known authenticated conflict is sticky even if later reads fail.
+        if liveness != 'foreign/conflicting':
+            liveness = "unknown"
+        issues.append(str(exc))
+        unavailable.append("native_liveness")
+    if liveness in ("unknown", "foreign/conflicting"):
+        ownership, live = "unverified", None
+    if not reasons:
+        reasons.append({"running": "Authenticated native application image and cgroup membership", "stopped": "Settled native service plus complete cgroup and same-user process absence checks", "transitional": "Authenticated native service is changing or executing its launch wrapper", "residual-process": "Owned native process survives outside a settled running main process", "unknown": "Required native facts unavailable", "foreign/conflicting": "Native provenance or process conflict"}[liveness])
     env = record["desktop"] if record and state.get("LoadState") != "not-found" else {}
-    pid = int(state.get("MainPID") or 0)
-    result = {"unit": unit, "load_state": state.get("LoadState"), "state": state.get("ActiveState"), "substate": state.get("SubState"), "result": state.get("Result"), "exit_status": state.get("ExecMainStatus"), "identity": process_identity(pid) if pid else None, "owned_pids": cgroup_pids(state), "mapped_windows": mapped_windows(pid, env), "visual_correctness": "not established by process/window status", "launch": record["spec"] if record else None, "phase": record["phase"] if record else None, "session": record["session"] if record else None, "desktop": {k: v for k, v in env.items() if k in ENV_KEYS}}
-    print(json.dumps(result, indent=2))
+    return {"claim_scope": claim_scope, "invocation_proof": invocation_proof, "ownership": ownership, "process_evidence": scanned, "discovery_coverage": coverage, "native_service": state, "unit": unit, "load_state": state.get("LoadState"), "state": state.get("ActiveState"), "substate": state.get("SubState"), "result": state.get("Result"), "exit_status": state.get("ExecMainStatus"), "identity": identity, "owned_pids": live, "mapped_windows": windows, "visual_correctness": "not established by process/window status", "launch": record["spec"] if record else None, "phase": record["phase"] if record else None, "session": record["session"] if record else None, "desktop": {k: v for k, v in env.items() if k in ENV_KEYS}, "observed_liveness": liveness, "observation_reasons": reasons, "observation_issues": issues, "unavailable_facts": unavailable, "gui_readiness": gui}
+
+
+def require_observation(result):
+    if result["observed_liveness"] in ("unknown", "foreign/conflicting") or result["observation_issues"]:
+        raise LaunchError("; ".join(result["observation_issues"] + result["observation_reasons"]) or "Native liveness unavailable")
+
+
+def status(unit, *, emit=True):
+    result = observe(unit)
+    if emit:
+        print(json.dumps(result, indent=2))
+    require_observation(result)
     return result
 
 
@@ -605,8 +1379,12 @@ def start(args, settings, previous=None):
         requested = make_spec(args, settings, record["spec"])
         require_matching_spec(record["spec"], requested)
         reject_unmanaged(requested, set(live))
-        print("Already running; current settings unchanged.")
-        return status(unit)
+        capture_bounded_proof(unit, record, path)
+        result = status(unit, emit=False)
+        if args.verbose:
+            print("Already running; current settings unchanged.")
+            print(json.dumps(result, indent=2))
+        return result
     spec = make_spec(args, settings, previous)
     validate_spec(spec)
     sid, env = desktop_environment(args.session)
@@ -650,30 +1428,41 @@ def start(args, settings, previous=None):
         record = dict(record, phase="failed")
         save_state(path, record)
         raise
-    print("Started independently of SSH. {} Visual correctness still requires inspection.".format("Mapped window observed." if windows else "No mapped window observed; process start only."))
-    return status(unit)
+    # Only this genuine start path (under the existing main lifecycle lock)
+    # can capture; durable actual application identity is already reconciled.
+    capture_bounded_proof(unit, record, path)
+    # Finish the same status inspection in both modes before reporting success.
+    result = status(unit, emit=False)
+    if args.verbose:
+        print("Started independently of SSH. {} Visual correctness still requires inspection.".format("Mapped window observed." if windows else "No mapped window observed; process start only."))
+        print(json.dumps(result, indent=2))
+    return result
 
 
-def stop(unit, force=False):
+def stop(unit, force=False, *, emit=True):
     state = unit_state(unit)
     if state.get("LoadState") == "not-found":
-        print("Already stopped.")
+        if emit:
+            print("Already stopped.")
         return
     path = state_path(unit)
     record = reconcile_record(state, read_state(path), path)
     live = cgroup_pids(state)
     if state.get("ActiveState") in ("inactive", "failed") and not live:
-        print("Already stopped; retained failure information is available in logs.")
+        if emit:
+            print("Already stopped; retained failure information is available in logs.")
         return
     # Recheck provenance, invocation, process identity and policy immediately before
     # each control operation, including a force request following a failed stop.
     if force:
         if not require_owned(unit_state(unit), record):
-            print("Already stopped.")
+            if emit:
+                print("Already stopped.")
             return
         command(["systemctl", "--user", "kill", "--kill-who=all", "--signal=SIGKILL", unit])
     if not require_owned(unit_state(unit), record):
-        print("Already stopped.")
+        if emit:
+            print("Already stopped.")
         return
     error = ""
     try:
@@ -687,7 +1476,8 @@ def stop(unit, force=False):
     if error or cgroup_pids(final) or (final.get("LoadState") != "not-found" and final.get("ActiveState") not in ("inactive", "failed")):
         raise LaunchError("Stop did not complete cleanly; no automatic force kill. Inspect status/logs, then explicitly run link-displayctl stop --unit {} --force to SIGKILL only the verified owned service. {}".format(unit, error))
     save_state(path, dict(record, phase="stopped"))
-    print("Stopped owned application; desktop and unrelated applications untouched.")
+    if emit:
+        print("Stopped owned application; desktop and unrelated applications untouched.")
 
 
 def export_log(path, text):
@@ -712,6 +1502,94 @@ def logs(args):
     return 0
 
 
+def desktop_error_record(text):
+    """One bounded 0600 record, no journals or private environment dumps."""
+    import stat
+    base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
+    if not base.is_absolute():
+        raise LaunchError("XDG_STATE_HOME must be absolute")
+    # Refuse symlinks in every existing ancestor, including the XDG root.
+    for part in reversed((base,) + tuple(base.parents)):
+        if part.is_symlink():
+            raise LaunchError("Refusing symlinked desktop error path")
+        if part.exists():
+            info = part.stat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, os.getuid()) or (info.st_mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX)):
+                raise LaunchError("Unsafe desktop error path ownership/permissions")
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory = base / "raspi-link-display"
+    if directory.is_symlink():
+        raise LaunchError("Refusing symlinked desktop error directory")
+    directory.mkdir(mode=0o700, exist_ok=True)
+    info = directory.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise LaunchError("Desktop error directory must be private")
+    path = directory / "desktop-error.log"
+    if path.is_symlink():
+        raise LaunchError("Refusing symlinked desktop error file")
+    # Do not truncate any existing inode (hard links included). Atomic replace
+    # of a fresh exclusive inode also avoids following an existing destination.
+    temp = directory / (".error-" + secrets.token_hex(12))
+    fd = os.open(str(temp), os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(text.encode("utf-8", errors="replace")[:8192])
+        os.replace(str(temp), str(path))
+    finally:
+        try:
+            temp.unlink()
+        except FileNotFoundError:
+            pass
+    return path
+
+
+def stock_presenter(name):
+    """Only root-owned stock tools, never a user PATH replacement."""
+    import stat
+    selected = shutil.which(name)
+    if not selected:
+        return None
+    try:
+        path = Path(selected).resolve(strict=True)
+        if path not in (Path("/usr/bin") / name, Path("/bin") / name):
+            return None
+        info = path.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022 or not stat.S_ISREG(info.st_mode) or not os.access(str(path), os.X_OK):
+            return None
+        return str(path)
+    except OSError:
+        return None
+
+
+def present_desktop_error(args, error):
+    # Called only after the lifecycle context has unwound. Neither this adapter
+    # nor an observation is authorized to create/control an application instance.
+    diagnostic = observe(args.unit)
+    # Deliberately exclude launch paths, desktop environment and credentials.
+    summary = {k: diagnostic[k] for k in ("observed_liveness", "state", "result", "exit_status", "observation_reasons", "observation_issues")}
+    try:
+        desktop_error_record(json.dumps({"error": error, "observation": summary}, ensure_ascii=True))
+    except (LaunchError, OSError, ValueError) as exc:
+        print("link-displayctl: private desktop error record unavailable: " + str(exc), file=sys.stderr)
+    _, desktop = desktop_environment(args.session)
+    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "LC_ALL", "LC_MESSAGES") if k in os.environ}
+    env.update(desktop)
+    message = "Raspi Link Display could not start. Run link-displayctl doctor or logs for details."
+    zenity = stock_presenter("zenity")
+    if zenity:
+        try:
+            result = command([zenity, "--error", "--no-markup", "--title=Raspi Link Display", "--text=" + message, "--timeout=12"], check=False, timeout=15, env=env)
+            if result.returncode in (0, 1, 5):
+                return
+        except LaunchError:
+            pass
+    # Stock X11 fallback does not require a notification daemon or markup.
+    xmessage = stock_presenter("xmessage")
+    if not xmessage:
+        raise LaunchError("No usable stock desktop error presenter")
+    command([xmessage, "-center", "-timeout", "12", "-title", "Raspi Link Display", message], timeout=15, env=env)
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=("doctor", "start", "status", "stop", "restart", "logs"))
@@ -722,6 +1600,8 @@ def parser():
     p.add_argument("--unit", default="raspi-link-display.service")
     p.add_argument("--session")
     p.add_argument("--windowed", action="store_true", default=None)
+    p.add_argument("--verbose", action="store_true", help="Show success explanations and status JSON for start/restart; successful start/restart are silent by default")
+    p.add_argument("--desktop", action="store_true", help="Present bounded desktop errors (start only)")
     p.add_argument("--force", action="store_true")
     p.add_argument("--lines", type=int, default=100)
     p.add_argument("--follow", action="store_true")
@@ -731,6 +1611,10 @@ def parser():
 
 def validate_options(args):
     validate_unit(args.unit)
+    if args.desktop and args.action != "start":
+        raise LaunchError("--desktop is supported only for start")
+    if args.verbose and args.action not in ("start", "restart"):
+        raise LaunchError("--verbose is supported only for start or restart")
     if args.force and args.action != "stop":
         raise LaunchError("--force is supported only for an explicit stop")
     if args.follow and args.export:
@@ -754,11 +1638,11 @@ def main(argv=None):
         if args.action == "logs":
             return logs(args)
         if args.action in ("status", "stop"):
-            # Lifecycle control is independent of optional/malformed launch bindings.
-            with lifecycle_lock(args.unit):
-                if args.action == "status":
-                    status(args.unit)
-                else:
+            # Diagnostics never acquire/create the lifecycle lock or state directory.
+            if args.action == "status":
+                status(args.unit)
+            else:
+                with lifecycle_lock(args.unit):
                     stop(args.unit, args.force)
             return 0
         default_settings = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "raspi-link-display/launcher.json"
@@ -768,9 +1652,9 @@ def main(argv=None):
             validate_spec(spec)
             sid, env = desktop_environment(args.session)
             unified_cgroup_mount()
-            state = unit_state(args.unit)
-            require_owned(state, read_state(state_path(args.unit)))
-            print(json.dumps({"project": spec, "session": sid, "desktop": env, "user_manager": "accessible", "unmanaged_instances": unmanaged_instances(spec, set(cgroup_pids(state))), "limits": "X11 and unified cgroup2 only; no boot autostart or logout/reboot survival; journal retention is host policy"}, indent=2))
+            observation = observe(args.unit)
+            print(json.dumps({"project": spec, "session": sid, "desktop": env, "user_manager": "accessible" if observation["load_state"] is not None else "unavailable", "unmanaged_instances": unmanaged_instances(spec, set(observation["owned_pids"] or [])), "observation": observation, "limits": "X11 and unified cgroup2 only; no boot autostart or logout/reboot survival; journal retention is host policy"}, indent=2))
+            require_observation(observation)
             return 0
         with lifecycle_lock(args.unit):
             previous = None
@@ -789,11 +1673,16 @@ def main(argv=None):
                 if record and (owned or state.get("ActiveState") in ("active", "activating", "deactivating")):
                     require_matching_session(args, record)
                 reject_unmanaged(spec, owned)
-                stop(args.unit)
+                stop(args.unit, emit=args.verbose)
             start(args, settings, previous)
         return 0
     except (LaunchError, OSError, ValueError) as exc:
         print("link-displayctl: " + str(exc), file=sys.stderr)
+        if args.desktop and args.action == "start" and sys.platform.startswith("linux") and os.getuid() != 0:
+            try:
+                present_desktop_error(args, str(exc))
+            except (LaunchError, OSError, ValueError) as presentation_error:
+                print("link-displayctl: desktop error presentation unavailable: " + str(presentation_error), file=sys.stderr)
         return 1
 
 

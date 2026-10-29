@@ -3,6 +3,7 @@ import contextlib
 import copy
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -58,7 +59,8 @@ class LauncherTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             values = {"unit_state": state or self.owned_state(record), "state_path": Path("unused"),
                       "read_state": record, "process_identity": self.record()["identity"],
-                      "cgroup_pids": [123] if pids is None else pids}
+                      "cgroup_pids": [123] if pids is None else pids,
+                      "observation_processes": []}
             mocks = {k: stack.enter_context(patch.object(self.m, k, return_value=v)) for k, v in values.items()}
             mocks["save_state"] = stack.enter_context(patch.object(self.m, "save_state"))
             yield mocks
@@ -424,12 +426,18 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(self.m.read_state(path)["phase"], "pending")
                 created.append(True)
                 raise KeyboardInterrupt()
-            with patch.object(self.m, "state_path", return_value=path), patch.object(self.m, "unit_state", side_effect=state), patch.object(self.m, "validate_spec"), patch.object(self.m, "desktop_environment", return_value=("A", self.record()["desktop"])), patch.object(self.m, "unified_cgroup_mount", return_value=SOURCE.parent), patch.object(self.m, "unmanaged_instances", return_value=[]), patch.object(self.m, "cgroup_pids", side_effect=lambda state: [123] if created else []), patch.object(self.m, "process_identity", return_value=self.record()["identity"]), patch.object(self.m, "command", side_effect=create), patch.object(self.m, "mapped_windows", return_value=[]):
+            with patch.object(self.m, "state_path", return_value=path), patch.object(self.m, "unit_state", side_effect=state), patch.object(self.m, "validate_spec"), patch.object(self.m, "desktop_environment", return_value=("A", self.record()["desktop"])), patch.object(self.m, "unified_cgroup_mount", return_value=SOURCE.parent), patch.object(self.m, "unmanaged_instances", return_value=[]), patch.object(self.m, "cgroup_pids", side_effect=lambda state, **kwargs: [123] if created else []), patch.object(self.m, "process_identity", return_value=self.record()["identity"]), patch.object(self.m, "command", side_effect=create), patch.object(self.m, "mapped_windows", return_value=[]):
                 with self.assertRaises(KeyboardInterrupt):
                     self.m.start(args, {})
                 self.assertEqual(self.m.read_state(path)["phase"], "pending")
-                result = self.m.status(args.unit)
-                self.assertEqual(result["phase"], "running")
+                with patch.object(self.m, "observation_processes", return_value=[]):
+                    before = path.read_bytes()
+                    result = self.m.status(args.unit)
+                    self.assertEqual(result["phase"], "pending")
+                    self.assertEqual(result["observed_liveness"], "running")
+                    self.assertEqual(path.read_bytes(), before)
+                # Genuine control-side reconciliation still recovers interrupted intent.
+                self.m.reconcile_record(state(args.unit), self.m.read_state(path), path)
                 self.assertEqual(self.m.read_state(path)["invocation_id"], "b" * 32)
 
     def test_immediate_failed_launch_retains_selection_and_nullable_identity(self):
@@ -764,7 +772,7 @@ class LauncherTests(unittest.TestCase):
         with self.owned_context(), patch.object(self.m, "unmanaged_instances", return_value=[]), patch.object(self.m, "command") as run, patch.object(self.m, "status", return_value={"unchanged": True}) as status:
             result = self.m.start(self.m.parser().parse_args(["start", "--session", "A"]), {})
             self.assertEqual(result, {"unchanged": True})
-            status.assert_called_once_with(self.record()["unit"])
+            status.assert_called_once_with(self.record()["unit"], emit=False)
             run.assert_not_called()
 
     def test_cross_unit_matching_instance_blocks_creation(self):
@@ -868,7 +876,7 @@ class LauncherTests(unittest.TestCase):
             known = self.record()["identity"]
             mocks["process_identity"].return_value = dict(known, executable=known["executable"] + " (deleted)", exe_unlinked=True)
             self.assertEqual(self.m.main(["restart"]), 0)
-            stop.assert_called_once_with(self.record()["unit"])
+            stop.assert_called_once_with(self.record()["unit"], emit=False)
             start.assert_called_once()
 
     def test_process_identity_pins_proc_exe_stat_and_rejects_exec_race(self):
@@ -942,6 +950,285 @@ class LauncherTests(unittest.TestCase):
             self.m.validate_options(self.m.parser().parse_args(["start", "--force"]))
         with self.assertRaises(self.m.LaunchError):
             self.m.validate_options(self.m.parser().parse_args(["logs", "--lines", "0"]))
+
+
+    @contextlib.contextmanager
+    def output_capture(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            yield stdout, stderr
+
+    @contextlib.contextmanager
+    def launch_output_context(self, initial="absent"):
+        # Actual parser/main/start/stop/status/reconciliation; only OS boundaries
+        # are mocked. No app, unit, cgroup or desktop is controlled by these tests.
+        saved = {"record": self.record() if initial == "running" else None,
+                 "live": initial == "running"}
+        def state(unit):
+            if not saved["live"]:
+                return {"LoadState": "not-found", "ActiveState": "inactive", "MainPID": "0"}
+            return self.owned_state()
+        def command(argv, **kwargs):
+            if argv[0] == "systemd-run":
+                saved["live"] = True
+            elif argv[:3] == ["systemctl", "--user", "stop"]:
+                saved["live"] = False
+            else:
+                self.fail("Unexpected lifecycle command: " + repr(argv))
+            return subprocess.CompletedProcess(argv, 0, "captured subprocess success", "captured subprocess success")
+        with self.linux_main_context(), contextlib.ExitStack() as stack:
+            replacements = {
+                "unit_state": {"side_effect": state},
+                "state_path": {"return_value": Path("unused")},
+                "read_state": {"side_effect": lambda path: copy.deepcopy(saved["record"])},
+                "save_state": {"side_effect": lambda path, record: saved.update(record=copy.deepcopy(record))},
+                "process_identity": {"return_value": self.record()["identity"]},
+                "cgroup_pids": {"side_effect": lambda state, **kwargs: [123] if state.get("MainPID") == "123" else []},
+                "unmanaged_instances": {"return_value": []},
+                "observation_processes": {"return_value": []},
+                "mapped_windows": {"return_value": ["0x1"]},
+                "command": {"side_effect": command},
+            }
+            mocks = {name: stack.enter_context(patch.object(self.m, name, **kwargs)) for name, kwargs in replacements.items()}
+            stack.enter_context(patch.object(self.m.secrets, "token_hex", return_value="a" * 32))
+            # Compare lifecycle semantics, not two independently sampled clock values.
+            stack.enter_context(patch.object(self.m.time, "monotonic", return_value=100.0))
+            yield saved, mocks
+
+    def test_verbose_parser_default_and_both_positions(self):
+        for action in ("start", "restart"):
+            self.assertFalse(self.m.parser().parse_args([action]).verbose)
+            for argv in (["--verbose", action], [action, "--verbose"]):
+                self.assertTrue(self.m.parser().parse_args(argv).verbose)
+
+    def test_verbose_help_describes_quiet_success(self):
+        with self.output_capture() as (out, err), self.assertRaises(SystemExit) as exit:
+            self.m.main(["--help"])
+        self.assertEqual(exit.exception.code, 0)
+        self.assertIn("--verbose", out.getvalue())
+        self.assertIn("silent", out.getvalue().lower())
+        self.assertEqual(err.getvalue(), "")
+
+    def test_verbose_unsupported_actions_refuse_before_effects(self):
+        for action in ("status", "doctor", "logs", "stop"):
+            for argv in (["--verbose", action], [action, "--verbose"]):
+                with self.subTest(argv=argv), self.linux_main_context(), self.output_capture() as (out, err), patch.object(self.m, "lifecycle_lock") as lock, patch.object(self.m, "unit_state") as state, patch.object(self.m, "load_settings") as settings, patch.object(self.m, "logs") as logs:
+                    self.assertEqual(self.m.main(argv), 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn("--verbose", err.getvalue())
+                    self.assertIn("start", err.getvalue())
+                    for mocked in (lock, state, settings, logs):
+                        mocked.assert_not_called()
+
+    def test_unknown_option_refuses_before_lifecycle(self):
+        with self.output_capture() as (out, err), patch.object(self.m, "lifecycle_lock") as lock, self.assertRaises(SystemExit) as exit:
+            self.m.main(["start", "--unknown-flag"])
+        self.assertEqual(exit.exception.code, 2)
+        self.assertIn("unrecognized", err.getvalue())
+        self.assertEqual(out.getvalue(), "")
+        lock.assert_not_called()
+
+    def assert_launch_output(self, action, initial):
+        runs = []
+        for verbose in (False, True):
+            argv = [action] + (["--verbose"] if verbose else [])
+            with self.launch_output_context(initial) as (saved, mocks), self.output_capture() as (out, err):
+                self.assertEqual(self.m.main(argv), 0)
+                self.assertEqual(err.getvalue(), "")
+                if verbose:
+                    explanation = "Already running" if action == "start" and initial == "running" else "Started independently of SSH"
+                    self.assertIn(explanation, out.getvalue())
+                    payload = json.loads(out.getvalue()[out.getvalue().index("{"):])
+                    self.assertEqual(payload["phase"], "running")
+                    self.assertEqual(payload["mapped_windows"], ["0x1"])
+                    self.assertEqual(payload["launch"], saved["record"]["spec"])
+                    if action == "restart":
+                        self.assertIn("Stopped owned" if initial == "running" else "Already stopped", out.getvalue())
+                else:
+                    self.assertEqual(out.getvalue(), "")
+                # Python 3.9 mock Call intercepts __deepcopy__; snapshot plain
+                # args/kwargs instead, preserving every OS-boundary call/value.
+                runs.append((copy.deepcopy(saved), {k: copy.deepcopy([(call.args, call.kwargs) for call in v.call_args_list]) for k, v in mocks.items()}))
+        self.assertEqual(runs[0], runs[1], "Verbosity must not alter lifecycle, identity, service argv or persisted selection")
+        commands = runs[0][1]["command"]
+        expected = 0 if action == "start" and initial == "running" else 2 if action == "restart" and initial == "running" else 1
+        self.assertEqual(len(commands), expected)
+        if expected == 2:
+            self.assertEqual(commands[0][0][0][:3], ["systemctl", "--user", "stop"])
+            self.assertEqual(commands[1][0][0][0], "systemd-run")
+        return runs
+
+    def test_fresh_start_quiet_verbose_output_and_lifecycle_parity(self):
+        self.assert_launch_output("start", "absent")
+
+    def test_idempotent_start_quiet_verbose_output_and_lifecycle_parity(self):
+        self.assert_launch_output("start", "running")
+
+    def test_live_restart_quiet_verbose_output_and_lifecycle_parity(self):
+        self.assert_launch_output("restart", "running")
+
+    def test_stopped_restart_quiet_verbose_output_and_lifecycle_parity(self):
+        self.assert_launch_output("restart", "absent")
+
+    def test_main_verbose_before_action_executes_real_start_and_restart(self):
+        for action in ("start", "restart"):
+            with self.subTest(action=action), self.launch_output_context(), self.output_capture() as (out, err):
+                self.assertEqual(self.m.main(["--verbose", action]), 0)
+                self.assertIn("Started independently", out.getvalue())
+                self.assertEqual(err.getvalue(), "")
+
+    def test_status_quiet_runs_same_inspection_and_returns_same_result(self):
+        results, calls = [], []
+        for emit in (False, True):
+            with self.owned_context(record=self.record("pending")) as mocks, patch.object(self.m.time, "monotonic", return_value=100.0), patch.object(self.m, "mapped_windows", return_value=["0x1"]) as windows, self.output_capture() as (out, err):
+                result = self.m.status(self.record()["unit"], emit=emit)
+                results.append(result)
+                calls.append({k: v.call_args_list for k, v in mocks.items()})
+                windows.assert_called_once_with(123, self.record()["desktop"])
+                self.assertEqual(result["phase"], "pending")
+                self.assertEqual(result["observed_liveness"], "running")
+                mocks["save_state"].assert_not_called()
+                self.assertEqual(err.getvalue(), "")
+                self.assertEqual(json.loads(out.getvalue()), result) if emit else self.assertEqual(out.getvalue(), "")
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(calls[0], calls[1])
+
+    def test_start_returns_status_result_in_both_output_modes(self):
+        results = []
+        for verbose in (False, True):
+            with self.launch_output_context("running"), self.output_capture():
+                results.append(self.m.start(self.m.parser().parse_args(["start"] + (["--verbose"] if verbose else [])), {}))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0]["owned_pids"], [123])
+
+    def test_final_status_failure_has_no_success_banner_or_json(self):
+        for initial in ("absent", "running"):
+            for verbose in (False, True):
+                with self.subTest(initial=initial, verbose=verbose), self.launch_output_context(initial) as (_, mocks), self.output_capture() as (out, err):
+                    mocks["mapped_windows"].side_effect = ([self.m.LaunchError("final window query failed")] if initial == "running" else [["0x1"], self.m.LaunchError("final window query failed")])
+                    self.assertEqual(self.m.main(["start"] + (["--verbose"] if verbose else [])), 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn("final window query failed", err.getvalue())
+
+    def test_quiet_and_verbose_main_failure_matrix(self):
+        cases = (("load_settings", "Invalid launcher settings"), ("validate_spec", "bad replacement config"),
+                 ("desktop_environment", "Only X11 is supported"), ("unified_cgroup_mount", "Unsupported hierarchy"),
+                 ("unmanaged_instances", "unmanaged inspection failed"), ("command", "creation failed"),
+                 ("mapped_windows", "window inspection failed"))
+        for name, message in cases:
+            for verbose in (False, True):
+                with self.subTest(name=name, verbose=verbose), self.launch_output_context() as (_, mocks), patch.object(self.m, name, side_effect=self.m.LaunchError(message)), self.output_capture() as (out, err):
+                    self.assertEqual(self.m.main(["start"] + (["--verbose"] if verbose else [])), 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn(message, err.getvalue())
+                    if name not in ("command", "mapped_windows"):
+                        mocks["command"].assert_not_called()
+
+    def test_quiet_verbose_ownership_and_selection_failures_unchanged(self):
+        for changes, message in (({"Environment": ""}, "marker"), ({"InvocationID": "c" * 32}, "InvocationID"),
+                                 ({"KillMode": "process"}, "shutdown"), ({"Description": "foreign"}, "foreign")):
+            for verbose in (False, True):
+                with self.subTest(changes=changes, verbose=verbose), self.launch_output_context("running") as (_, mocks), patch.object(self.m, "unit_state", return_value=self.owned_state(**changes)), self.output_capture() as (out, err):
+                    self.assertEqual(self.m.main(["start"] + (["--verbose"] if verbose else [])), 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn(message, err.getvalue())
+                    mocks["command"].assert_not_called()
+        for options, message in ((["--session", "B"], "session A"), (["--config", str(SOURCE.parent / "changed.conf")], "different settings")):
+            for verbose in (False, True):
+                with self.launch_output_context("running") as (_, mocks), self.output_capture() as (out, err):
+                    self.assertEqual(self.m.main(["start"] + options + (["--verbose"] if verbose else [])), 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn(message, err.getvalue())
+                    mocks["command"].assert_not_called()
+
+    def test_restart_validation_precedes_stop_in_both_modes(self):
+        for verbose in (False, True):
+            for name in ("validate_spec", "desktop_environment", "unified_cgroup_mount", "unmanaged_instances"):
+                with self.subTest(name=name, verbose=verbose), self.launch_output_context("running") as (_, mocks), patch.object(self.m, name, side_effect=self.m.LaunchError("invalid replacement")), self.output_capture() as (out, err):
+                    self.assertEqual(self.m.main(["restart"] + (["--verbose"] if verbose else [])), 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn("invalid replacement", err.getvalue())
+                    mocks["command"].assert_not_called()
+
+    def test_restart_stop_failure_is_actionable_and_never_starts_replacement(self):
+        for verbose in (False, True):
+            with self.launch_output_context("running") as (_, mocks), patch.object(self.m, "command", return_value=subprocess.CompletedProcess([], 1, "", "stop denied")) as run, self.output_capture() as (out, err):
+                self.assertEqual(self.m.main(["restart"] + (["--verbose"] if verbose else [])), 1)
+                self.assertEqual(out.getvalue(), "")
+                self.assertIn("stop denied", err.getvalue())
+                self.assertIn("no automatic force", err.getvalue())
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0][:3], ["systemctl", "--user", "stop"])
+
+    def test_internal_stop_gates_every_success_site_without_changing_control(self):
+        cases = ("missing", "retained", "vanished", "force-vanished", "stopped")
+        for case in cases:
+            runs = []
+            for emit in (False, True):
+                with self.subTest(case=case, emit=emit), self.owned_context() as mocks, patch.object(self.m, "command", return_value=subprocess.CompletedProcess([], 0, "", "")) as run, self.output_capture() as (out, err):
+                    if case == "missing":
+                        mocks["unit_state"].return_value = {"LoadState": "not-found"}
+                    elif case == "retained":
+                        mocks["unit_state"].return_value = self.owned_state(ActiveState="failed", MainPID="0")
+                        mocks["cgroup_pids"].return_value = []
+                    elif case in ("vanished", "force-vanished"):
+                        mocks["unit_state"].side_effect = [self.owned_state(), {"LoadState": "not-found"}]
+                    else:
+                        mocks["unit_state"].side_effect = [self.owned_state(), self.owned_state(), {"LoadState": "not-found"}]
+                        mocks["cgroup_pids"].side_effect = [[123], []]
+                    self.m.stop(self.record()["unit"], force=case == "force-vanished", emit=emit)
+                    self.assertEqual(err.getvalue(), "")
+                    if emit:
+                        self.assertIn("Stopped owned" if case == "stopped" else "Already stopped", out.getvalue())
+                    else:
+                        self.assertEqual(out.getvalue(), "")
+                    runs.append(({k: v.call_args_list for k, v in mocks.items()}, run.call_args_list))
+            self.assertEqual(runs[0], runs[1])
+
+    def test_explicit_status_doctor_logs_and_stop_keep_output(self):
+        with self.launch_output_context("running"), self.output_capture() as (out, err):
+            self.assertEqual(self.m.main(["status"]), 0)
+            self.assertEqual(json.loads(out.getvalue())["phase"], "running")
+            self.assertEqual(err.getvalue(), "")
+        with self.launch_output_context(), self.output_capture() as (out, err):
+            # No-record/custom absence is intentionally unknown, even with a
+            # complete legacy scan. Doctor still prints its requested report.
+            self.assertEqual(self.m.main(["doctor"]), 1)
+            report = json.loads(out.getvalue())
+            self.assertEqual(report["user_manager"], "accessible")
+            self.assertEqual(report["observation"]["observed_liveness"], "unknown")
+            self.assertTrue(err.getvalue())
+        for initial in ("absent", "running"):
+            with self.launch_output_context(initial), self.output_capture() as (out, err):
+                self.assertEqual(self.m.main(["stop"]), 0)
+                self.assertIn("Already stopped" if initial == "absent" else "Stopped owned", out.getvalue())
+                self.assertEqual(err.getvalue(), "")
+        with self.linux_main_context(), patch.object(self.m, "command", return_value=subprocess.CompletedProcess([], 0, "intentional journal output\n", "")), self.output_capture() as (out, err):
+            self.assertEqual(self.m.main(["logs"]), 0)
+            self.assertEqual(out.getvalue(), "intentional journal output\n")
+            self.assertEqual(err.getvalue(), "")
+
+    def test_verbose_is_ephemeral_not_settings_spec_record_or_service_arguments(self):
+        for action in ("start", "restart"):
+            plain = self.m.parser().parse_args([action])
+            verbose = self.m.parser().parse_args(["--verbose", action])
+            spec = self.m.make_spec(plain, {})
+            self.assertEqual(spec, self.m.make_spec(verbose, {}))
+            self.assertEqual(set(spec), {"project", "binary", "config", "windowed"})
+            argv = self.m.service_arguments(plain.unit, spec, self.record()["desktop"], "a" * 32)
+            self.assertEqual(argv, self.m.service_arguments(verbose.unit, self.m.make_spec(verbose, {}), self.record()["desktop"], "a" * 32))
+            # A legitimate source directory may itself contain "verbose".
+            self.assertNotIn("--verbose", argv)
+            self.assertFalse(any(arg.startswith("--setenv=") and "verbose" in arg.split("=", 2)[1].lower() for arg in argv))
+        record = self.record()
+        record["verbose"] = True
+        with self.assertRaises(ValueError):
+            self.m.validate_record(record)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text('{"verbose": true}')
+            with self.assertRaises(self.m.LaunchError):
+                self.m.load_settings(path)
 
 
 class FixtureSafetyTests(unittest.TestCase):

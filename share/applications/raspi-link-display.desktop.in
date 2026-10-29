@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Raspi LINK Display
+Comment=Display Ableton Link timing in the current desktop session
+Exec=@EXEC@
+Icon=raspi-link-display
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupNotify=false

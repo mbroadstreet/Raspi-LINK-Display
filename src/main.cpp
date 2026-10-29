@@ -2,6 +2,7 @@
 #include "DisplayText.h"
 #include "LinkEngine.h"
 #include "SdlRenderer.h"
+#include "RuntimeInstanceGuard.h"
 
 #include <atomic>
 #include <chrono>
@@ -82,6 +83,9 @@ int main(int argc, char** argv)
             printEffectiveConfig(config);
             return 0;
         }
+        // Declared before engine: release only after Link/SDL destruction,
+        // including exception unwinding. Inspection exits above stay lease-free.
+        runtime_admission::RuntimeInstanceGuard runtimeLease;
         LinkEngine engine(config.initialTempo, config.quantum);
 
         if (config.noGui)

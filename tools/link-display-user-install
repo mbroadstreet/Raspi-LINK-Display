@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""Per-user desktop metadata, never application control. Python 3.9+ stdlib.
+
+Default: print a read-only JSON plan. Save stdout, review, then repeat the
+same command with --apply-plan FILE. --stage selects a private XDG data root.
+No updater, shell, menu-cache tool, desktop trust operation or helper invocation.
+"""
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import uuid
+
+SCHEMA = 'raspi-link-desktop-v1'
+DESKTOP = 'applications/raspi-link-display.desktop'
+ICON = 'icons/hicolor/scalable/apps/raspi-link-display.svg'
+STATE = '.raspi-link-display-install'
+MANIFEST = STATE + '/manifest.json'
+SOURCE = Path(__file__).resolve().parent.parent
+LIMIT = 1024 * 1024
+
+
+class Refusal(ValueError):
+    pass
+
+
+def encoded(data):
+    return None if data is None else base64.b64encode(data).decode('ascii')
+
+
+def decoded(data):
+    return None if data is None else base64.b64decode(data, validate=True)
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def json_bytes(value):
+    return (json.dumps(value, indent=2, sort_keys=True) + '\n').encode('utf-8')
+
+
+def absolute(value):
+    if not isinstance(value, str) or not os.path.isabs(value) or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise Refusal('Expected an absolute path without control characters')
+    return os.path.abspath(value)
+
+
+def data_home():
+    value = os.environ.get('XDG_DATA_HOME')
+    return absolute(value if value else os.path.join(absolute(os.environ.get('HOME', '')), '.local', 'share'))
+
+
+def exec_value(helper, unit=None):
+    absolute(helper)
+    # Exec's executable cannot contain '='. ASCII is the spec's string type.
+    if '=' in helper or not helper.isascii():
+        raise Refusal('Exec helper must be ASCII and cannot contain =')
+    if unit is not None and not re.fullmatch(r'raspi-link-display-[A-Za-z0-9_-]+\.service', unit):
+        raise Refusal('Candidate unit must be raspi-link-display-<private-name>.service')
+    quoted = ''.join('\\' + c if c in '\\"`$' else c for c in helper)
+    # First encode Exec quoting, then the desktop string-value escape layer.
+    quoted = quoted.replace('%', '%%').replace('\\', '\\\\')
+    # Keep field-code-bearing paths out of the executable position.
+    # The target system interpreter invokes the same absolute helper, no shell/PATH.
+    result = '/usr/bin/python3 "' + quoted + '" start --desktop'
+    return result + (' --unit ' + unit if unit else '')
+
+
+def check_directory(path, owned=False):
+    """No symlinks in any existing component; unsafe writable ancestors refused.
+
+    Sticky shared temporary ancestors are allowed for isolated test roots only;
+    the selected data root and all descendants must belong to this user.
+    """
+    path = Path(absolute(str(path)))
+    for item in reversed([path] + list(path.parents)):
+        try:
+            st = item.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(st.st_mode) or item.is_symlink():
+            raise Refusal('Unsafe directory/symlink: ' + str(item))
+        if os.name != 'nt':
+            uid = os.getuid()
+            if (owned and item == path and st.st_uid != uid) or st.st_uid not in (0, uid):
+                raise Refusal('Unsafe directory owner: ' + str(item))
+            if st.st_mode & 0o022 and not (item != path and st.st_mode & stat.S_ISVTX):
+                raise Refusal('Writable directory: ' + str(item))
+
+
+def snapshot(path):
+    path = Path(path)
+    check_directory(path.parent)
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(before.st_mode) or path.is_symlink() or before.st_nlink != 1:
+        raise Refusal('Unsafe non-regular/symlink/hardlinked file: ' + str(path))
+    if os.name != 'nt' and (before.st_uid != os.getuid() or before.st_mode & 0o022):
+        raise Refusal('Unsafe file owner/mode: ' + str(path))
+    if before.st_size > LIMIT:
+        raise Refusal('Oversize metadata: ' + str(path))
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
+    fd = os.open(str(path), flags)
+    with os.fdopen(fd, 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        data = stream.read(LIMIT + 1)
+        after = os.fstat(stream.fileno())
+    key = lambda st: [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_mode, st.st_uid, st.st_nlink]
+    final = path.lstat()
+    # Windows 3.14 path stat reports creation time as ctime while fd stat
+    # reports change time. Compare each source's ctime across the read; retain
+    # every other cross-source identity field. POSIX keeps its full ctime gate.
+    cross = lambda st: key(st)[:4] + key(st)[5:] if os.name == 'nt' else key(st)
+    if (key(before) != key(final) or key(opened) != key(after)
+            or cross(before) != cross(opened) or len(data) > LIMIT):
+        raise Refusal('File changed during read: ' + str(path))
+    return {'identity': key(before), 'sha256': digest(data), 'bytes': encoded(data)}
+
+
+def metadata(snap):
+    # Deliberately not an inode: a legitimate atomic replacement changes it.
+    return None if snap is None else dict(zip(('mode', 'uid', 'nlink'), snap['identity'][5:8]))
+
+
+def output_metadata(path, data):
+    if data is None:
+        return None
+    mode = 0o666 if os.name == 'nt' else (0o600 if Path(path).name == 'manifest.json' else 0o644)
+    return {'mode': stat.S_IFREG | mode, 'uid': 0 if os.name == 'nt' else os.getuid(), 'nlink': 1}
+
+
+def endpoint_matches(snap, data, meta):
+    return (snap['bytes'] if snap else None) == data and metadata(snap) == meta
+
+
+def read_json(path):
+    snap = snapshot(path)
+    if snap is None:
+        raise Refusal('Missing JSON: ' + str(path))
+    return json.loads(decoded(snap['bytes']).decode('utf-8'))
+
+
+def destinations(root):
+    return [str(Path(root) / p) for p in (DESKTOP, ICON, MANIFEST)]
+
+
+def make_plan(operation, root, helper=None, unit=None, receipt=None):
+    root = absolute(root)
+    check_directory(root, owned=True)
+    paths = destinations(root)
+    for rel in (DESKTOP, ICON, MANIFEST):
+        parent = Path(root) / rel
+        for directory in parent.parents:
+            if directory == Path(root):
+                break
+            check_directory(directory, owned=True)
+    current = {p: snapshot(p) for p in paths}
+    previous = current[paths[2]]
+    manifest = json.loads(decoded(previous['bytes'])) if previous else {'schema': SCHEMA, 'root': root, 'owned': {}}
+    if manifest.get('schema') != SCHEMA or manifest.get('root') != root or not isinstance(manifest.get('owned'), dict):
+        raise Refusal('Foreign/invalid ownership manifest')
+    if any(k not in (DESKTOP, ICON) or not isinstance(v, dict)
+           or set(v) != {'sha256', 'mode'}
+           or not re.fullmatch('[0-9a-f]{64}', str(v['sha256']))
+           or v['mode'] not in (0o644, 0o666)
+           for k, v in manifest['owned'].items()):
+        raise Refusal('Invalid ownership manifest entries')
+    def owned_matches(rel, snap):
+        expected = manifest['owned'].get(rel)
+        return (expected is not None and snap is not None
+                and expected['sha256'] == snap['sha256']
+                and expected['mode'] == stat.S_IMODE(snap['identity'][5]))
+    desired = {}
+    desired_metadata = {}
+    retained = []
+    if operation == 'install':
+        command = exec_value(helper, unit)
+        template = (SOURCE / 'share/applications/raspi-link-display.desktop.in').read_bytes()
+        if template.count(b'@EXEC@') != 1:
+            raise Refusal('Invalid desktop template')
+        payloads = {DESKTOP: template.replace(b'@EXEC@', command.encode('ascii')),
+                    ICON: (SOURCE / 'share/icons/raspi-link-display.svg').read_bytes()}
+        for rel, payload in payloads.items():
+            path = str(Path(root) / rel)
+            snap = current[path]
+            if snap is not None and not owned_matches(rel, snap):
+                raise Refusal('Collision or user-changed output: ' + path)
+            desired[path] = payload
+        desired[paths[2]] = json_bytes({'schema': SCHEMA, 'root': root,
+                                         'owned': {p: {'sha256': digest(b), 'mode': 0o666 if os.name == 'nt' else 0o644}
+                                                   for p, b in payloads.items()}})
+    elif operation == 'remove':
+        remaining = {}
+        for rel, expected in manifest['owned'].items():
+            path = str(Path(root) / rel)
+            snap = current[path]
+            if snap is not None and not owned_matches(rel, snap):
+                retained.append(path)
+                remaining[rel] = expected
+            else:
+                desired[path] = None
+        desired[paths[2]] = json_bytes({'schema': SCHEMA, 'root': root, 'owned': remaining}) if remaining else None
+    elif operation == 'recover':
+        receipt = absolute(receipt)
+        receipt_dir = Path(root) / STATE / 'recovery'
+        if Path(receipt).parent != receipt_dir:
+            raise Refusal('Recovery receipt must be inside this root recovery directory')
+        record = read_json(receipt)
+        if record.get('schema') != SCHEMA or record.get('root') != root:
+            raise Refusal('Foreign recovery receipt')
+        for entry in record['changes']:
+            path = entry['path']
+            if path not in paths or path in desired:
+                raise Refusal('Invalid recovery target')
+            if 'after_metadata' not in entry:
+                raise Refusal('Incomplete recovery metadata; preserve and inspect the old journal')
+            now = current[path]
+            before_bytes = entry['before']['bytes'] if entry['before'] else None
+            before_metadata = metadata(entry['before'])
+            # An interrupted transaction may have reached only a prefix. Compare
+            # bytes AND permission/owner/type/link metadata at both endpoints.
+            # Current snapshot/plan still pins inode and read-race identities.
+            if not (endpoint_matches(now, entry['after'], entry['after_metadata'])
+                    or endpoint_matches(now, before_bytes, before_metadata)):
+                raise Refusal('Recovery would replace changed predecessor: ' + path)
+            desired[path] = decoded(before_bytes)
+            desired_metadata[path] = before_metadata
+    else:
+        raise Refusal('Unknown operation')
+    changes = []
+    for path, after in desired.items():
+        before = current[path]
+        after_metadata = desired_metadata.get(path, output_metadata(path, after))
+        if not endpoint_matches(before, encoded(after), after_metadata):
+            changes.append({'path': path, 'before': before, 'after': encoded(after),
+                            'after_metadata': after_metadata})
+    return {'schema': SCHEMA, 'operation': operation, 'root': root,
+            'helper': helper, 'unit': unit, 'receipt': receipt,
+            'observed': current, 'changes': changes, 'retained': sorted(retained)}
+
+
+def mkdir_safe(path, root):
+    path = Path(path)
+    check_directory(path, owned=True)
+    if not path.exists():
+        if path.parent != path:
+            mkdir_safe(path.parent, root)
+        path.mkdir(mode=0o700 if STATE in path.parts or str(path) == root else 0o755)
+    check_directory(path, owned=True)
+
+
+def exclusive_write(path, data, mode=0o644):
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
+    fd = os.open(str(path), flags, mode)
+    with os.fdopen(fd, 'wb') as stream:
+        if os.name != 'nt':
+            os.fchmod(stream.fileno(), mode)
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def apply_plan(plan):
+    if plan.get('schema') != SCHEMA:
+        raise Refusal('Unknown plan format')
+    # Never accept arbitrary output bytes or destinations from a supplied plan.
+    args = [plan[k] for k in ('operation', 'root', 'helper', 'unit', 'receipt')]
+    if make_plan(*args) != plan:
+        raise Refusal('Stale or tampered plan; create and review a fresh dry-run')
+    if not plan['changes']:
+        return None
+    root = plan['root']
+    state = Path(root) / STATE
+    mkdir_safe(state, root)
+    lock = state / 'transaction.lock'
+    try:
+        exclusive_write(lock, b'In-progress desktop metadata transaction\n', 0o600)
+    except FileExistsError:
+        raise Refusal('Transaction lock exists; inspect recovery before manual lock removal')
+    receipt = None
+    try:
+        if make_plan(*args) != plan:
+            raise Refusal('Predecessor changed while acquiring lock')
+        recovery = state / 'recovery'
+        mkdir_safe(recovery, root)
+        receipt = recovery / (uuid.uuid4().hex + '.json')
+        # Durable byte-preserved predecessors before any output changes.
+        exclusive_write(receipt, json_bytes({'schema': SCHEMA, 'root': root,
+                                            'changes': plan['changes']}), 0o600)
+        for entry in plan['changes']:
+            path = Path(entry['path'])
+            mkdir_safe(path.parent, root)
+            if snapshot(path) != entry['before']:
+                raise Refusal('Changed predecessor; recovery retained at ' + str(receipt))
+            data = decoded(entry['after'])
+            mode = stat.S_IMODE(entry['after_metadata']['mode']) if data is not None else None
+            if data is None:
+                path.unlink()
+            elif entry['before'] is None:
+                exclusive_write(path, data, mode)
+            else:
+                temporary = state / ('write-' + uuid.uuid4().hex)
+                try:
+                    exclusive_write(temporary, data, mode)
+                    if snapshot(path) != entry['before']:
+                        raise Refusal('Changed predecessor before replacement')
+                    os.replace(str(temporary), str(path))
+                finally:
+                    if temporary.exists():
+                        temporary.unlink()
+            actual = snapshot(path)
+            if not endpoint_matches(actual, entry['after'], entry['after_metadata']):
+                raise Refusal('Output readback differs; inspect recovery ' + str(receipt))
+        return str(receipt)
+    finally:
+        lock.unlink()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('operation', choices=['install', 'remove', 'recover'])
+    parser.add_argument('--helper', help='absolute stable/candidate helper; required for install')
+    parser.add_argument('--unit', help='explicit private candidate unit; default is omitted from Exec')
+    parser.add_argument('--stage', help='private XDG data root, not a menu registration claim')
+    parser.add_argument('--receipt', help='recovery JSON returned by an earlier apply')
+    parser.add_argument('--apply-plan', help='apply exactly a previously reviewed dry-run JSON')
+    args = parser.parse_args(argv)
+    try:
+        if args.operation == 'install' and not args.helper:
+            raise Refusal('install requires --helper')
+        if args.operation != 'install' and (args.helper or args.unit):
+            raise Refusal('--helper/--unit are install-only')
+        if args.operation == 'recover' and not args.receipt:
+            raise Refusal('recover requires --receipt')
+        if args.operation != 'recover' and args.receipt:
+            raise Refusal('--receipt is recover-only')
+        root = absolute(args.stage) if args.stage else data_home()
+        plan = make_plan(args.operation, root, args.helper, args.unit, args.receipt)
+        if args.apply_plan:
+            saved = read_json(absolute(args.apply_plan))
+            if saved != plan:
+                raise Refusal('Saved plan differs from current dry-run; no changes applied')
+            receipt = apply_plan(saved)
+            print(json.dumps({'applied': True, 'recovery_receipt': receipt, 'retained': plan['retained']}))
+        else:
+            sys.stdout.write(json_bytes(plan).decode('utf-8'))
+        return 0
+    except (Refusal, OSError, ValueError, KeyError, TypeError) as exc:
+        print('link-display-user-install: ' + str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

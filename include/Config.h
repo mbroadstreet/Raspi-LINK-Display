@@ -26,6 +26,10 @@ struct Config
 
     // Font
     std::string fontPath;
+    std::string statusFontPath;
+    std::string tempoFontPath;
+    std::string bottomFontPath;
+    std::string helpFontPath;
     int statusFontSize = 30;
     int tempoFontSize = 110;
     int bottomFontSize = 25;
@@ -37,14 +41,14 @@ struct Config
     RgbaColor bottomBandColor {0, 0, 0, 255};
 
     // Status colors
-    RgbaColor statusInactiveColor {40, 44, 48, 255};
-    RgbaColor statusNoPeersColor {40, 44, 48, 255};
-    RgbaColor statusConnectedColor {75, 85, 95, 255};
-    RgbaColor tempoColor {64, 79, 96, 255};
+    RgbaColor statusInactiveColor {100, 44, 48, 255};
+    RgbaColor statusNoPeersColor {40, 54, 88, 255};
+    RgbaColor statusConnectedColor {105, 105, 95, 255};
+    RgbaColor tempoColor {84, 89, 166, 255};
 
     // Phase meter
-    RgbaColor phaseBarColor {83, 114, 151, 255};
-    RgbaColor phaseMarkerColor {255, 255, 255, 255};
+    RgbaColor phaseBarColor {73, 164, 121, 255};
+    RgbaColor phaseMarkerColor {125, 205, 25, 255};
     int phaseBarHeight = 22;
     int phaseBarSegmentGap = 6;
     int phaseBarMargin = 24;

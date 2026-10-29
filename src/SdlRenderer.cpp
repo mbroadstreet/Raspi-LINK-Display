@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -17,6 +18,40 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    using FontHandle = std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)>;
+    struct StagedFonts
+    {
+        FontHandle status{nullptr, &TTF_CloseFont};
+        FontHandle tempo{nullptr, &TTF_CloseFont};
+        FontHandle bottom{nullptr, &TTF_CloseFont};
+        FontHandle help{nullptr, &TTF_CloseFont};
+    };
+
+    FontHandle openRoleFont(const char* role, const std::string& path, int size)
+    {
+        if (path.empty())
+            throw std::runtime_error(std::string("font open unsuccessful: role=")
+                + role + " path=<empty> (no resolved font path)");
+        FontHandle font{TTF_OpenFont(path.c_str(), size), &TTF_CloseFont};
+        if (!font)
+        {
+            const std::string error = TTF_GetError();
+            throw std::runtime_error(std::string("font open unsuccessful: role=")
+                + role + " path=" + path + " SDL_ttf=" + error);
+        }
+        return font;
+    }
+
+    StagedFonts stageFonts(const Config& config)
+    {
+        StagedFonts fonts;
+        fonts.status = openRoleFont("status", config.statusFontPath, config.statusFontSize);
+        fonts.tempo = openRoleFont("tempo", config.tempoFontPath, config.tempoFontSize);
+        fonts.bottom = openRoleFont("bottom", config.bottomFontPath, config.bottomFontSize);
+        fonts.help = openRoleFont("help", config.helpFontPath, config.helpFontSize);
+        return fonts;
     }
 
     SDL_Color toSDL(const RgbaColor& c)
@@ -62,22 +97,26 @@ SdlRenderer::SdlRenderer(const Config& config)
 
     require(renderer_ != nullptr, std::string("SDL_CreateRenderer failed: ") + SDL_GetError());
 
-    if (config_.fontPath.empty())
+    // Constructor failure bypasses the destructor. Limit cleanup to this font phase:
+    // stageFonts unwinds its handles before the catch shuts down successful subsystems.
+    try
     {
-        throw std::runtime_error(
-            "No usable TTF font found. Use --font PATH or install DejaVu/Liberation fonts."
-        );
+        auto fonts = stageFonts(config_);
+        statusFont_ = fonts.status.release();
+        tempoFont_ = fonts.tempo.release();
+        bottomFont_ = fonts.bottom.release();
+        helpFont_ = fonts.help.release();
     }
-
-    statusFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.statusFontSize);
-    tempoFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.tempoFontSize);
-    bottomFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.bottomFontSize);
-    helpFont_ = TTF_OpenFont(config_.fontPath.c_str(), config_.helpFontSize);
-
-    require(statusFont_ != nullptr, std::string("TTF_OpenFont status failed: ") + TTF_GetError());
-    require(tempoFont_ != nullptr, std::string("TTF_OpenFont tempo failed: ") + TTF_GetError());
-    require(bottomFont_ != nullptr, std::string("TTF_OpenFont bottom failed: ") + TTF_GetError());
-    require(helpFont_ != nullptr, std::string("TTF_OpenFont help failed: ") + TTF_GetError());
+    catch (...)
+    {
+        SDL_DestroyRenderer(renderer_);
+        renderer_ = nullptr;
+        SDL_DestroyWindow(window_);
+        window_ = nullptr;
+        TTF_Quit();
+        SDL_Quit();
+        throw;
+    }
 
     // Hide mouse cursor in fullscreen if requested
     if (config_.fullscreen && config_.hideMouseCursor)
@@ -104,72 +143,32 @@ SdlRenderer::~SdlRenderer()
 
 bool SdlRenderer::tryReplaceFontsFromConfig(const Config& cfg)
 {
-    if (cfg.fontPath.empty())
+    try
     {
-        std::cerr << "Reload: candidate font_path is empty" << std::endl;
+        auto fonts = stageFonts(cfg);
+        TTF_Font* oldStatus = statusFont_;
+        TTF_Font* oldTempo = tempoFont_;
+        TTF_Font* oldBottom = bottomFont_;
+        TTF_Font* oldHelp = helpFont_;
+
+        // Commit every live handle before any old handle is closed.
+        statusFont_ = fonts.status.release();
+        tempoFont_ = fonts.tempo.release();
+        bottomFont_ = fonts.bottom.release();
+        helpFont_ = fonts.help.release();
+
+        if (oldHelp) TTF_CloseFont(oldHelp);
+        if (oldBottom) TTF_CloseFont(oldBottom);
+        if (oldTempo) TTF_CloseFont(oldTempo);
+        if (oldStatus) TTF_CloseFont(oldStatus);
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Config reload failed: " << e.what()
+                  << " (kept previous working configuration and fonts)." << std::endl;
         return false;
     }
-
-    TTF_Font* status = TTF_OpenFont(cfg.fontPath.c_str(), cfg.statusFontSize);
-    TTF_Font* tempo = nullptr;
-    TTF_Font* bottom = nullptr;
-    TTF_Font* help = nullptr;
-
-    auto closeTemps = [&]() {
-        if (help) { TTF_CloseFont(help); help = nullptr; }
-        if (bottom) { TTF_CloseFont(bottom); bottom = nullptr; }
-        if (tempo) { TTF_CloseFont(tempo); tempo = nullptr; }
-        if (status) { TTF_CloseFont(status); status = nullptr; }
-    };
-
-    if (!status)
-    {
-        std::cerr << "Reload: TTF_OpenFont status failed: " << TTF_GetError() << std::endl;
-        closeTemps();
-        return false;
-    }
-
-    tempo = TTF_OpenFont(cfg.fontPath.c_str(), cfg.tempoFontSize);
-    if (!tempo)
-    {
-        std::cerr << "Reload: TTF_OpenFont tempo failed: " << TTF_GetError() << std::endl;
-        closeTemps();
-        return false;
-    }
-
-    bottom = TTF_OpenFont(cfg.fontPath.c_str(), cfg.bottomFontSize);
-    if (!bottom)
-    {
-        std::cerr << "Reload: TTF_OpenFont bottom failed: " << TTF_GetError() << std::endl;
-        closeTemps();
-        return false;
-    }
-
-    help = TTF_OpenFont(cfg.fontPath.c_str(), cfg.helpFontSize);
-    if (!help)
-    {
-        std::cerr << "Reload: TTF_OpenFont help failed: " << TTF_GetError() << std::endl;
-        closeTemps();
-        return false;
-    }
-
-    // All four opened: swap, then close previous live fonts only after swap.
-    TTF_Font* oldStatus = statusFont_;
-    TTF_Font* oldTempo = tempoFont_;
-    TTF_Font* oldBottom = bottomFont_;
-    TTF_Font* oldHelp = helpFont_;
-
-    statusFont_ = status;
-    tempoFont_ = tempo;
-    bottomFont_ = bottom;
-    helpFont_ = help;
-
-    if (oldHelp) TTF_CloseFont(oldHelp);
-    if (oldBottom) TTF_CloseFont(oldBottom);
-    if (oldTempo) TTF_CloseFont(oldTempo);
-    if (oldStatus) TTF_CloseFont(oldStatus);
-
-    return true;
 }
 
 void SdlRenderer::applyCursorVisibilityFromConfig()
@@ -272,9 +271,6 @@ bool SdlRenderer::pollQuit()
                 else if (!tryReplaceFontsFromConfig(config_))
                 {
                     config_ = previousConfig;
-                    std::cout << "Config reload failed: font open unsuccessful "
-                                 "(kept previous working configuration and fonts)."
-                              << std::endl;
                 }
                 else
                 {

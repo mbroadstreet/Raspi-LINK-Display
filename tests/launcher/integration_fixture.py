@@ -307,6 +307,21 @@ def main():
         return json.loads(r.stdout[r.stdout.index("{"):])
 
 
+    def custom_settled(suffix):
+        # Diagnostic unknown does NOT replace native cleanup/ownership evidence.
+        r = json.loads(invoke("status", suffix, expected=1).stdout)
+        require(r['observed_liveness'] == 'unknown' and r['owned_pids'] is None,
+                'Custom fixture must not acquire reviewed-app absence proof')
+        native = cleanup.ctl.unit_state(cleanup.unit(suffix))
+        require(native.get('LoadState') == 'not-found' or native.get('ActiveState') in ('inactive','failed'),
+                'Fixture unit is not settled')
+        require(not cleanup.ctl.cgroup_pids(native), 'Native fixture cgroup residue')
+        record = cleanup.ctl.read_state(cleanup.ctl.state_path(cleanup.unit(suffix)))
+        if record and record['identity']:
+            cleanup.ctl.bounded_absence(record['identity'], cleanup.ctl.time.monotonic()+1)
+        return r
+
+
     def passed(name):
         results.append(name)
         print("PASS " + name, flush=True)
@@ -339,13 +354,13 @@ def main():
         assert export.read_bytes() == before
         passed("log export refuses overwrite")
         invoke("stop", "normal")
-        assert not state("normal")["owned_pids"]
+        custom_settled("normal")
         invoke("stop", "normal")
         passed("graceful targeted stop and repeated stop")
         assert "fixture: normal shutdown" in invoke("logs", "normal").stdout
         passed("graceful shutdown message is logged")
         invoke("start", "fail", common + ["--config", str(root / "tests/launcher/fixture-fail.conf")], expected=1)
-        f = state("fail")
+        f = custom_settled("fail")
         assert f["state"] == "failed" and f["exit_status"] == "7" and not f["owned_pids"]
         assert "deliberate startup failure" in invoke("logs", "fail").stdout
         passed("startup failure exit and stderr retained without respawn")
@@ -363,7 +378,7 @@ def main():
         assert original["pid"] in state("ignore")["owned_pids"]
         passed("failed stop residue blocks duplicate start")
         invoke("stop", "ignore", ["--force"])
-        assert not state("ignore")["owned_pids"]
+        custom_settled("ignore")
         passed("explicit force recovery is confined to owned fixture")
         invoke("doctor", "normal", common + ["--config", str(root / "tests/launcher/fixture-normal.conf"), "--session", "999999"], expected=1)
         passed("absent graphical session fails clearly")

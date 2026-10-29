@@ -1,3 +1,8 @@
+# HISTORICAL EXAMPLE ONLY — not the accepted deployment mechanism.
+# Do not install/enable this system service as part of managed user launching.
+# Current operation: tools/link-displayctl and its transient same-user service.
+# See docs/DESKTOP-LAUNCH.md; boot autostart and Restart=on-failure are not
+# current approved policy. Original example body is retained below for lineage.
 [Unit]
 Description=Ableton Link Pi Display
 After=graphical.target network-online.target

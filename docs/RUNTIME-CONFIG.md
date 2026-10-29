@@ -10,7 +10,7 @@ Status (v0.6 path):
 
 ## Conceptual Hierarchy
 
-- **Screen preset** — An ordinary sparse configuration file selected at launch time (Ticket 4). It explicitly defines its screen contract and file-only palette while inheriting unrelated compiled defaults and built-in color presets.
+- **Screen preset** — An ordinary sparse configuration file selected at launch time (Ticket 4). It explicitly defines its screen contract and base palette while inheriting unrelated compiled defaults and built-in color presets.
 - **Color preset** — A built-in or file-defined named collection of color values. A color preset overrides only color-related settings. Cycled with **P**.
 - **R key** — Reloads the original startup config source at runtime (visual settings).
 - **P key** — Cycles through named color presets in the currently loaded configuration.
@@ -24,7 +24,8 @@ Pressing `R` in GUI mode reloads the configuration source while the application 
 ### Reload source rules
 
 - Explicit startup `--config PATH`: every R reloads that same PATH.
-- Auto-discovered `config/link-pi-display.conf` loaded at startup: every R reloads that same discovered path.
+- With no `--config`, startup checks **CWD-relative** `config/link-pi-display.conf`. If loaded, every R reloads that same discovered path. No flag is not proof of a no-file run.
+- The managed helper always supplies an explicit config (normally `config/presets/480x320-landscape.conf`); it does not exercise no-file startup.
 - No config file loaded at startup: R rebuilds built-in defaults and re-applies original CLI overrides. It does not discover a new file later.
 - Reload never writes a config file. A preset reached only with P is runtime state and is not written to the file or persisted elsewhere.
 
@@ -68,13 +69,44 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 1. Parse and validate the candidate configuration (Config-level).
 2. Attempt to open all four required fonts (status, tempo, bottom, help) into temporary `TTF_Font` objects.
 3. Only if **all** opens succeed: swap them into use, close the old fonts, keep the new Config.
-4. If any font fails: close every temporary font opened during the attempt, restore the previous Config, keep existing fonts, report nonfatal error.
+4. If any font fails: close every temporary font opened during the attempt, restore the complete previous Config and active P-selected preset, keep existing fonts and cursor preference, report one nonfatal `font open unsuccessful` outcome identifying role/path/error. No reload-success receipt is emitted.
+
+The current role-font candidate uses the same staged all-four operation at startup. Each role owns a separate handle, even for the same path. A startup font-phase failure closes staged handles and releases the already-created renderer/window and initialized TTF/SDL resources before exiting; successful teardown closes each live handle once. Successful reload opens all replacements before closing old fonts, then applies committed cursor preference. R preserves the live F selection/window geometry and does not restart Link.
 
 ### Missing / invalid config at reload
 
 - Explicit or auto-discovered path missing at reload time → nonfatal; keep previous state.
 - Existing file with invalid numeric/Boolean/RGBA/margin/preset data → nonfatal; keep previous state.
 - This differs from startup, where invalid explicit config (and invalid content through shared fatal validators) still fails the process.
+
+## Font paths and portability
+
+The current candidate adds four optional **file** keys, with independently retained sizes:
+
+| Role path key | Size key | Use |
+|---|---|---|
+| `status_font_path` | `status_font_size` | Status line |
+| `tempo_font_path` | `tempo_font_size` | Tempo |
+| `bottom_font_path` | `bottom_font_size` | Opened/owned only; bottom band remains phase-only, with no visible text |
+| `help_font_path` | `help_font_size` | F1 overlay |
+
+For **each** role, precedence is global `--font PATH` → role file key → general file `font_path` → existing discovery. Key order is irrelevant. Global `--font` overrides all roles at startup and across repeated R; no role-specific CLI flags or UI chooser exist. R constructs fresh defaults/file/CLI state and resolves again: removing a role key restores inheritance, not its old effective value. Sizes remain independent.
+
+All explicitly supplied empty or space/tab-only paths are rejected immediately: general or role keys, repeated assignments, and `--font`, even if a later assignment/global override would mask them. Omit a key to inherit; `key=` is not a reset. Meaningful characters in a nonempty CLI pathname are not stripped.
+
+Paths are literal. Relative font paths use the process CWD, **not** the config file directory. The helper uses its selected project as CWD. There is no shell/environment/tilde expansion, config-relative rebasing or new quoting format in the application; existing file trimming/LF syntax stays unchanged. Shell quotes around CLI arguments are shell syntax, not characters to add inside a config value. Inactive examples below name operator-provided files, not bundled assets or promised fonts:
+
+```ini
+# font_path=assets/fonts/display.ttf
+# status_font_path=assets/fonts/status.ttf
+# tempo_font_path=assets/fonts/tempo.ttf
+# bottom_font_path=assets/fonts/bottom.ttf
+# help_font_path=assets/fonts/help.ttf
+```
+
+Existing discovery order is `./assets/fonts/display.ttf`, `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`, `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`, then `/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf`. No machine-specific path is newly compiled as a role default; no enumeration, download, redistribution or new dependency is added. Operators must verify paths, font licensing, glyph coverage, metrics/readability and clipping on their target display. Historical screenshots/physical baseline acceptance do not certify newly selected fonts.
+
+Nonempty nonexistent, unreadable, directory or non-font paths fail at actual SDL_ttf opening; they do not silently fall back. Four valid explicit roles work without general discovery, and an unused bad general path is not opened if every role overrides it. A missing role without a usable fallback fails with that role identified. `--print-config` is parser/precedence inspection only, not a font-open/resource or visual test.
 
 ## P Key — Color Preset Cycling (Implemented, Ticket 2)
 
@@ -87,8 +119,8 @@ Manual **F** fullscreen toggle updates the tracked live `fullscreen` value only 
 
 ### Base / Default Colors vs presets
 
-- **Compiled defaults** are always the first layer. Starting with no config keeps the diagnostic dim palette: inactive `40,44,48,255`; no-peers `40,44,48,255`; connected `75,85,95,255`; tempo `64,79,96,255`; phase bar `83,114,151,255`; marker `255,255,255,255`.
-- **Sparse file overrides** replace only keys actively assigned by the selected file. The main example and supplied screen files override the same six colors with inactive `100,44,48,255`; no-peers `40,54,88,255`; connected `105,105,95,255`; tempo `84,89,166,255`; phase bar `73,164,121,255`; marker `125,205,25,255`.
+- **Compiled defaults** are always the first layer. The current candidate promotes the six active example colors: inactive `100,44,48,255`; no-peers `40,54,88,255`; connected `105,105,95,255`; tempo `84,89,166,255`; phase bar `73,164,121,255`; marker `125,205,25,255`. These are genuine no-file defaults, not an automatic load of the example.
+- **Sparse file overrides** replace only keys actively assigned by the selected file. The main example and supplied screen files retain explicit assignments matching those defaults. Custom values and partial presets remain authoritative; the unchanged built-in high contrast is still a separate preset.
 - **Base / Default Colors** are captured from the effective top-level colors after compiled defaults, sparse file overrides, original CLI replay, and supported alias resolution, but before applying the selected initial preset. Current CLI options do not directly set colors. Commented or omitted file keys inherit compiled values; uncommenting a key creates an override. `--print-config` displays the final effective configuration.
 - A **label-only** preset (for example `color_preset.default.name=Default` with **no** `color_preset.default.*_color` keys) does not force color overrides. Activating it restores the captured base colors.
 - A **partial** preset may define only some `color_preset.<id>.*_color` keys. Unspecified colors **inherit from the base layer**, not from the previously active preset.
@@ -109,7 +141,7 @@ The construction order at startup and during a successful R is: compiled default
 ### Config syntax
 
 ```ini
-# Sparse file-only base override
+# Sparse explicit base assignment (matches the current compiled tempo default)
 tempo_color=84,89,166,255
 
 # Omit color_presets= to retain built-in default,high_contrast.
@@ -148,7 +180,7 @@ They keep explicit screen-contract values (window size/mode, four font sizes, an
 
 ## `--print-config`
 
-Includes effective values plus:
+Includes general `font_path`, resolved `status_font_path`, `tempo_font_path`, `bottom_font_path`, `help_font_path`, the independent sizes, and preset fields:
 
 ```
 color_presets=...
@@ -162,5 +194,7 @@ active_color_preset=...
 3. Ticket 4 screen configs and left-aligned F1 information — implementation checkpoint `ace2a7f` passed complete owner/Pi validation. Determine publication, merge, tag, and release status from repository refs and release records.
 
 ## Status
+
+The defaults/role-font/launch work on `v0.7-defaults-fonts-desktop-launch` is a candidate, not a validated release. Its native ownership, GUI and installed local/SSH gates require separately recorded execution evidence.
 
 Ticket 3's Pi-validation statement is inherited from its accepted checkpoint. The owner reports that the complete targeted Raspberry Pi matrix passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`. This documentation-only closeout records inherited validation results and does not represent a new runtime or Raspberry Pi test run. Branch publication, merge, tag, and release status must be determined from repository refs and release records. See ROADMAP and TEST-PLAN.
