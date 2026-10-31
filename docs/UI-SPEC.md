@@ -47,6 +47,14 @@ This layout (black top/bottom, dark grey center) is intentional to improve reada
 
 The older keys `background_color` and `band_color` are supported only as deprecated compatibility aliases.
 
+## Current candidate palette and font limits
+
+The current candidate's compiled six-color base palette matches the active main example/screen files: inactive `100,44,48,255`, no-peers `40,54,88,255`, connected `105,105,95,255`, tempo `84,89,166,255`, phase bar `73,164,121,255`, marker `125,205,25,255`. Band/help colors and high-contrast overrides are unchanged; custom file/preset values remain authoritative.
+
+Optional status/tempo/bottom/help font paths use global `--font` → role key → general `font_path` → discovery. Bottom remains phase-only: its font is opened/owned, not rendered as text. R commits all four fonts and safe visuals together or retains the complete prior Config/fonts/active preset/cursor preference; F selection/window geometry and Link are retained.
+
+These candidate changes are not a new validated release. New fonts require target glyph, readability and clipping checks; historical framebuffer screenshots and Owner acceptance of the previous physical baseline do not certify future font choices. No font chooser, role CLI, touch UI or font download is added.
+
 ## Help Overlay (F1)
 
 - Press **F1** in GUI mode to show a brief help overlay.
@@ -67,7 +75,7 @@ The older keys `background_color` and `band_color` are supported only as depreca
 
 Many visual and layout values can be changed via `config/link-pi-display.conf` without recompiling:
 
-- Font sizes
+- General and optional role font paths, plus independent font sizes (current candidate; see [Runtime Config](RUNTIME-CONFIG.md#font-paths-and-portability))
 - Colors (status, tempo, phase bar, help overlay, band backgrounds)
 - Phase bar dimensions
 - Help overlay timeout

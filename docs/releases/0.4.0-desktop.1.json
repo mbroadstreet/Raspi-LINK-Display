@@ -1,0 +1,108 @@
+{
+  "accepted_ELF_rebuilt": false,
+  "as_built_selection_identity": "b2d3efdcc18d9e8414561e6f6fd4352b876764904b0ef47648f6e7118564f1c0",
+  "baseline_shipping_source52": "ed56c8bcfb7ddb328c519d326ea786dbe8095c34f41a548e1a8bcaa2424a6abe",
+  "files": {
+    "bin/link-displayctl": {
+      "gid": 1000,
+      "mode": 448,
+      "sha256": "f9a879bb0bb3ea12d9b28893d55b86824b30bfd918b18400ca023dd0d72d9637",
+      "size": 87569,
+      "uid": 1000
+    },
+    "bin/link-pi-display": {
+      "gid": 1000,
+      "mode": 448,
+      "sha256": "b8d48bc0a4609fa0ca77313094ccd3e45d1f661faefecc5edc8c3550490bc048",
+      "size": 620616,
+      "uid": 1000
+    },
+    "config/profile.conf": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "d0c0dc41a658561ea049c3e8d3b0a0fd801ab92f79c2d62f4ee2c84719cae28a",
+      "size": 1427,
+      "uid": 1000
+    },
+    "provenance/BUILD-SELECTION.json": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "a9bacdcb69f13bb53aaf0ccd11559022fb19cdf5a2d5ddda548b088eb23b133a",
+      "size": 368073,
+      "uid": 1000
+    },
+    "provenance/native-build-success.json": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "35c5f3e228d6c80c7aa09baa23d3bec65cdba99cecdc5d6cd2589b37e17bca32",
+      "size": 919150,
+      "uid": 1000
+    },
+    "share/applications/raspi-link-display.desktop.in": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "3198e68fc496ddf2dab7a68d513ccde332ada71fa04d43b5b383d41154c4585d",
+      "size": 236,
+      "uid": 1000
+    },
+    "share/icons/raspi-link-display.svg": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "0553274b802d4e7955fe8bf66152910ad21e75308d75eb8017bfe2fdf920da7d",
+      "size": 364,
+      "uid": 1000
+    },
+    "share/licenses/ableton-link-GPL-v2.md": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "62f171d4d8b6726df61f18a6bbc0a70f79c4bc2134d837d35c81fc6289a2d84d",
+      "size": 17941,
+      "uid": 1000
+    },
+    "share/licenses/ableton-link-LICENSE.md": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "34ea9a1681e5e9a5a57bf4ee2ebd2f165fe541974325ea918aafd47b338d32b9",
+      "size": 801,
+      "uid": 1000
+    },
+    "share/licenses/asio-BOOST-1.0.txt": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "size": 1338,
+      "uid": 1000
+    },
+    "share/licenses/raspi-link-display-MIT.txt": {
+      "gid": 1000,
+      "mode": 384,
+      "sha256": "9cb04a0ad0892acfcb2e19c74db0f3e717e4f58391349177f845ff0ea5ffd1c2",
+      "size": 1083,
+      "uid": 1000
+    },
+    "tools/link-display-user-install": {
+      "gid": 1000,
+      "mode": 448,
+      "sha256": "afbd19f6a6853d589eb899b79a0f1ccce3683f0bbb48dca8aca67af456d4e940",
+      "size": 16312,
+      "uid": 1000
+    }
+  },
+  "host_dependencies": {
+    "abi": "armhf Bullseye existing tested PiTouch host",
+    "build_only_not_shipped": "CMake/compiler/headers/Git/source checkout/QA and evidence controllers",
+    "fonts": [
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    ],
+    "runtime": "existing host Python3.9+/standard library; systemd user manager/dbus/logind/cgroup2; SDL2/SDL_ttf/ELF loader closure/X11 desktop; stock X11/bus tools and zenity/xmessage; DejaVuSans-Bold fallback",
+    "source": "HOST-DEPENDENCIES.json in release evidence"
+  },
+  "manifest_self_hash": "Excluded; complete archive and manifest are externally pinned. No release.json value overrides helper trusted build pins.",
+  "provenance_policy": "Original receipts byte-preserved and historical roots authenticated as data only; active runtime proof binds concrete resolved helper root; no proof/record reuse or translation.",
+  "release": "0.4.0-desktop.1",
+  "runtime_helper_sha256": "f9a879bb0bb3ea12d9b28893d55b86824b30bfd918b18400ca023dd0d72d9637",
+  "runtime_root": "/home/pi/.local/opt/raspi-link-display/releases/0.4.0-desktop.1",
+  "schema": 1,
+  "source_base_commit": "64a8cd3911a33fc65658c1fa38cbc4c5cca88f8a",
+  "source_delta_sha256": "b4f3d4638cb118183b3bafb3be8827584b2c58aa234e5bf344cb078a1f314ea4"
+}

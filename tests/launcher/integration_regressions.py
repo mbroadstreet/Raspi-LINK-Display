@@ -220,6 +220,21 @@ def main():
         return json.loads(call("status", suffix).stdout)
 
 
+    def custom_settled(suffix):
+        # Diagnostic unknown does NOT replace native cleanup/ownership evidence.
+        r = json.loads(call("status", suffix, expected=1).stdout)
+        require(r['observed_liveness'] == 'unknown' and r['owned_pids'] is None,
+                'Custom fixture must not acquire reviewed-app absence proof')
+        native = cleanup.ctl.unit_state(cleanup.unit(suffix))
+        require(native.get('LoadState') == 'not-found' or native.get('ActiveState') in ('inactive','failed'),
+                'Fixture unit is not settled')
+        require(not cleanup.ctl.cgroup_pids(native), 'Native fixture cgroup residue')
+        record = cleanup.ctl.read_state(cleanup.ctl.state_path(cleanup.unit(suffix)))
+        if record and record['identity']:
+            cleanup.ctl.bounded_absence(record['identity'], cleanup.ctl.time.monotonic()+1)
+        return r
+
+
     def track(suffix):
         cleanup.reconcile(suffix)
         s = status(suffix)
@@ -286,10 +301,10 @@ def main():
         with malformed.open("x") as f:
             f.write("{broken\n")
         call("stop", "bindings", ["--settings", str(malformed)])
-        assert not status("bindings")["owned_pids"]
+        custom_settled("bindings")
         start("bindings")
         call("stop", "bindings", ["--settings", str(malformed), "--force"])
-        assert not status("bindings")["owned_pids"]
+        custom_settled("bindings")
         passed("stop and explicit force remain usable despite malformed unrelated settings")
 
         literal = work / "literal-${PROFILE}-$HOME"
@@ -405,7 +420,7 @@ def main():
             assert all(after["identity"][k] == first["identity"][k] for k in ("pid", "start_ticks", "exe_device", "exe_inode"))
             call("start", "native-normal", native_normal)
             call("stop", "native-normal")
-            assert not status("native-normal")["owned_pids"]
+            custom_settled("native-normal")
             assert "native fixture: normal shutdown" in call("logs", "native-normal").stdout
             passed("owned native status/idempotent start/graceful stop survive executable replacement, including a literal deleted suffix")
             before_restart = start("native-normal", native_normal)
@@ -430,7 +445,7 @@ def main():
             residual = verify_native_residual(cleanup.ctl, unit("native-force"), pinned, alive)
             native_evidence["force_residual"] = {"status": alive, "verified_identity": residual}
             call("stop", "native-force", ["--force"])
-            assert not status("native-force")["owned_pids"]
+            custom_settled("native-force")
             assert cleanup.ctl.process_identity(pinned["identity"]["pid"]) is None
             assert hashlib.sha256(saved.read_bytes()).hexdigest() == original_hash
             passed("owned nonresponsive replaced native fixture requires explicit force; original compiled bytes retained")

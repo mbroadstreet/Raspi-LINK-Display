@@ -5,6 +5,63 @@
 #include <cstdlib>
 #include <fstream>
 #include <cstdio>
+#include <filesystem>
+#include <chrono>
+#include <sstream>
+#include <stdexcept>
+#include <cerrno>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#include <sys/wait.h>
+#endif
+
+namespace fs = std::filesystem;
+static fs::path fixtureRoot;
+
+// Create an exclusive directory; never use an operator's implicit config or fixed /tmp names.
+struct FixtureWorkspace {
+    fs::path original = fs::current_path();
+    FixtureWorkspace() {
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (int i = 0; i < 100; ++i) {
+            const auto candidate = fs::temp_directory_path() /
+                ("link-config-tests-" + std::to_string(nonce) + "-" + std::to_string(i));
+            if (fs::create_directory(candidate)) { fixtureRoot = candidate; break; }
+        }
+        if (fixtureRoot.empty()) throw std::runtime_error("Cannot create exclusive fixtures");
+        fs::create_directories(fixtureRoot / "config/presets");
+        for (const auto& name : {"link-pi-display.example.conf", "presets/480x320-landscape.conf",
+                                "presets/480x320-high-contrast.conf", "presets/320x240-landscape.conf"})
+            fs::copy_file(original / "config" / name, fixtureRoot / "config" / name);
+        fs::current_path(fixtureRoot);
+    }
+    ~FixtureWorkspace() {
+        fs::current_path(original);
+        fs::remove_all(fixtureRoot);
+    }
+};
+static std::string fixture(const std::string& name) { return (fixtureRoot / name).string(); }
+class CheckedFixtureOutput : public std::ofstream
+{
+public:
+    explicit CheckedFixtureOutput(const std::string& path) : std::ofstream(path)
+    {
+        // Fail the harness itself on IO errors, not a negative child for a missing fixture.
+        exceptions(std::ios::failbit | std::ios::badbit);
+    }
+};
+static void writeFixtureAt(const std::string& path, const std::string& text) {
+    CheckedFixtureOutput out(path);
+    out << text;
+    out.close();
+    if (!out) throw std::runtime_error("Fixture write failed: " + path);
+}
+static void writeFixture(const std::string& name, const std::string& text) {
+    writeFixtureAt(fixture(name), text);
+}
+
 
 static int failures = 0;
 static std::string selfPath;
@@ -161,23 +218,56 @@ static void testScreenPreset(const std::string& testName,
 // Run a child test case by re-executing self with special flag
 static int run_child(const std::string& case_name, const std::vector<std::string>& args)
 {
-    std::string exe = selfPath.empty() ? std::string("./config_parser_tests") : selfPath;
-    std::string cmd = exe + " --test-child " + case_name;
-    for (size_t i = 0; i < args.size(); ++i)
-    {
-        cmd += " " + args[i];
+    std::vector<std::string> storage = {selfPath, "--test-child", case_name};
+    storage.insert(storage.end(), args.begin(), args.end());
+    std::vector<char*> argv;
+    for (auto& arg : storage) argv.push_back(const_cast<char*>(arg.c_str()));
+    argv.push_back(nullptr);
+#ifdef _WIN32
+    std::vector<std::string> quoted;
+    for (const auto& arg : storage) {
+        std::string value = "\"";
+        size_t slashes = 0;
+        for (char c : arg) {
+            if (c == '\\') { ++slashes; continue; }
+            value.append(c == '"' ? slashes * 2 + 1 : slashes, '\\');
+            value += c;
+            slashes = 0;
+        }
+        value.append(slashes * 2, '\\');
+        value += '"';
+        quoted.push_back(value);
     }
-    return std::system(cmd.c_str());
+    std::vector<const char*> nativeArgv;
+    for (const auto& arg : quoted) nativeArgv.push_back(arg.c_str());
+    nativeArgv.push_back(nullptr);
+    const auto result = _spawnv(_P_WAIT, selfPath.c_str(), nativeArgv.data());
+    if (result < 0) throw std::runtime_error("Child spawn failed");
+    return static_cast<int>(result);
+#else
+    const pid_t pid = fork();
+    if (pid < 0) throw std::runtime_error("Child fork failed");
+    if (pid == 0) {
+        execv(selfPath.c_str(), argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    pid_t waited;
+    do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+    if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) == 127)
+        throw std::runtime_error("Child did not exit normally");
+    return WEXITSTATUS(status);
+#endif
 }
 
 int main(int argc, char** argv)
 {
-    selfPath = (argc > 0 ? std::string(argv[0]) : std::string("./config_parser_tests"));
+    selfPath = fs::absolute(argc > 0 ? argv[0] : "./config_parser_tests").string();
 
     // Support child mode for negative tests
     if (argc > 2 && std::string(argv[1]) == "--test-child")
     {
-        std::string case_name = argv[2];
+        const std::string case_name = argv[2];
         std::vector<std::string> child_args;
         child_args.push_back(argv[0]);
         for (int i = 3; i < argc; ++i)
@@ -185,8 +275,12 @@ int main(int argc, char** argv)
             child_args.push_back(argv[i]);
         }
         Config c = parse_for_test(child_args);
+        if (case_name == "success")
+            return c.fontPath == " literal ' font.ttf " && c.width == 640 ? 0 : 2;
         return 0;
     }
+
+    FixtureWorkspace workspace;
 
     // === Good paths ===
     {
@@ -195,18 +289,18 @@ int main(int argc, char** argv)
         expect("default_config_fullscreen", c.fullscreen == true);
         expect("default_config_tempo", c.initialTempo == 120.0);
         expect("default_config_center_band", c.centerBandColor.r == 18 && c.centerBandColor.g == 18 && c.centerBandColor.b == 18);
-        expect("no_config_compiled_dim_status_inactive",
-               rgbaEquals(c.statusInactiveColor, 40, 44, 48, 255));
-        expect("no_config_compiled_dim_status_no_peers",
-               rgbaEquals(c.statusNoPeersColor, 40, 44, 48, 255));
-        expect("no_config_compiled_dim_status_connected",
-               rgbaEquals(c.statusConnectedColor, 75, 85, 95, 255));
-        expect("no_config_compiled_dim_tempo",
-               rgbaEquals(c.tempoColor, 64, 79, 96, 255));
-        expect("no_config_compiled_dim_phase_bar",
-               rgbaEquals(c.phaseBarColor, 83, 114, 151, 255));
-        expect("no_config_compiled_dim_phase_marker",
-               rgbaEquals(c.phaseMarkerColor, 255, 255, 255, 255));
+        expect("no_config_compiled_status_inactive",
+               rgbaEquals(c.statusInactiveColor, 100, 44, 48, 255));
+        expect("no_config_compiled_status_no_peers",
+               rgbaEquals(c.statusNoPeersColor, 40, 54, 88, 255));
+        expect("no_config_compiled_status_connected",
+               rgbaEquals(c.statusConnectedColor, 105, 105, 95, 255));
+        expect("no_config_compiled_tempo",
+               rgbaEquals(c.tempoColor, 84, 89, 166, 255));
+        expect("no_config_compiled_phase_bar",
+               rgbaEquals(c.phaseBarColor, 73, 164, 121, 255));
+        expect("no_config_compiled_phase_marker",
+               rgbaEquals(c.phaseMarkerColor, 125, 205, 25, 255));
     }
 
     {
@@ -284,48 +378,48 @@ int main(int argc, char** argv)
 
     // === Strict validation via temp config files (for config-file keys) ===
     {
-        std::ofstream tmp("/tmp/test_bad_status_font.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_status_font.conf"));
         tmp << "status_font_size=0\n";
         tmp.close();
-        int rc = run_child("bad_status_font_size_zero", {"--config", "/tmp/test_bad_status_font.conf"});
+        int rc = run_child("bad_status_font_size_zero", {"--config", fixture("test_bad_status_font.conf")});
         expect("bad_status_font_size_zero", rc != 0);
-        std::remove("/tmp/test_bad_status_font.conf");
+        std::remove(fixture("test_bad_status_font.conf").c_str());
     }
 
     {
-        std::ofstream tmp("/tmp/test_bad_phase_gap.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_phase_gap.conf"));
         tmp << "phase_bar_segment_gap=-7\n";
         tmp.close();
-        int rc = run_child("bad_phase_gap_negative", {"--config", "/tmp/test_bad_phase_gap.conf"});
+        int rc = run_child("bad_phase_gap_negative", {"--config", fixture("test_bad_phase_gap.conf")});
         expect("bad_phase_gap_negative", rc != 0);
-        std::remove("/tmp/test_bad_phase_gap.conf");
+        std::remove(fixture("test_bad_phase_gap.conf").c_str());
     }
 
     {
-        std::ofstream tmp("/tmp/test_bad_help_overlay.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_help_overlay.conf"));
         tmp << "help_overlay_seconds=999\n";
         tmp.close();
-        int rc = run_child("bad_help_overlay_seconds", {"--config", "/tmp/test_bad_help_overlay.conf"});
+        int rc = run_child("bad_help_overlay_seconds", {"--config", fixture("test_bad_help_overlay.conf")});
         expect("bad_help_overlay_seconds", rc != 0);
-        std::remove("/tmp/test_bad_help_overlay.conf");
+        std::remove(fixture("test_bad_help_overlay.conf").c_str());
     }
 
     {
-        std::ofstream tmp("/tmp/test_bad_color_value.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_color_value.conf"));
         tmp << "status_inactive_color=999,44,48,255\n";
         tmp.close();
-        int rc = run_child("bad_color_value", {"--config", "/tmp/test_bad_color_value.conf"});
+        int rc = run_child("bad_color_value", {"--config", fixture("test_bad_color_value.conf")});
         expect("bad_color_value", rc != 0);
-        std::remove("/tmp/test_bad_color_value.conf");
+        std::remove(fixture("test_bad_color_value.conf").c_str());
     }
 
     {
-        std::ofstream tmp("/tmp/test_bad_color_partial.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_color_partial.conf"));
         tmp << "status_inactive_color=40abc,44,48,255\n";
         tmp.close();
-        int rc = run_child("bad_color_partial", {"--config", "/tmp/test_bad_color_partial.conf"});
+        int rc = run_child("bad_color_partial", {"--config", fixture("test_bad_color_partial.conf")});
         expect("bad_color_partial", rc != 0);
-        std::remove("/tmp/test_bad_color_partial.conf");
+        std::remove(fixture("test_bad_color_partial.conf").c_str());
     }
 
     // CLI-based negatives (real CLI options)
@@ -337,39 +431,39 @@ int main(int argc, char** argv)
     // === Alias behavior ===
     // background_color maps to center only if center absent
     {
-        std::ofstream tmp("/tmp/test_alias_bg.conf");
+        CheckedFixtureOutput tmp(fixture("test_alias_bg.conf"));
         tmp << "background_color=10,20,30,255\n";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_alias_bg.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_alias_bg.conf")});
         expect("alias_background_maps_to_center", c.centerBandColor.r == 10 && c.centerBandColor.g == 20 && c.centerBandColor.b == 30);
-        std::remove("/tmp/test_alias_bg.conf");
+        std::remove(fixture("test_alias_bg.conf").c_str());
     }
 
     // band_color maps to top/bottom only if explicit top/bottom absent
     {
-        std::ofstream tmp("/tmp/test_alias_band.conf");
+        CheckedFixtureOutput tmp(fixture("test_alias_band.conf"));
         tmp << "band_color=5,6,7,255\n";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_alias_band.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_alias_band.conf")});
         expect("alias_band_maps_to_top", c.topBandColor.r == 5 && c.topBandColor.g == 6 && c.topBandColor.b == 7);
         expect("alias_band_maps_to_bottom", c.bottomBandColor.r == 5 && c.bottomBandColor.g == 6 && c.bottomBandColor.b == 7);
-        std::remove("/tmp/test_alias_band.conf");
+        std::remove(fixture("test_alias_band.conf").c_str());
     }
 
     // explicit top/center/bottom win over aliases
     {
-        std::ofstream tmp("/tmp/test_explicit_wins.conf");
+        CheckedFixtureOutput tmp(fixture("test_explicit_wins.conf"));
         tmp << "background_color=99,99,99,255\n";
         tmp << "center_band_color=11,22,33,255\n";
         tmp << "band_color=44,55,66,255\n";
         tmp << "top_band_color=1,2,3,255\n";
         tmp << "bottom_band_color=7,8,9,255\n";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_explicit_wins.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_explicit_wins.conf")});
         expect("explicit_center_wins_over_alias", c.centerBandColor.r == 11 && c.centerBandColor.g == 22 && c.centerBandColor.b == 33);
         expect("explicit_top_wins_over_alias", c.topBandColor.r == 1 && c.topBandColor.g == 2 && c.topBandColor.b == 3);
         expect("explicit_bottom_wins_over_alias", c.bottomBandColor.r == 7 && c.bottomBandColor.g == 8 && c.bottomBandColor.b == 9);
-        std::remove("/tmp/test_explicit_wins.conf");
+        std::remove(fixture("test_explicit_wins.conf").c_str());
     }
 
     // === CLI behavior failures (real CLI options) ===
@@ -386,7 +480,7 @@ int main(int argc, char** argv)
     // === v0.6 Color Preset tests ===
     {
         // Good: basic presets via temp file
-        std::ofstream tmp("/tmp/test_presets_good.conf");
+        CheckedFixtureOutput tmp(fixture("test_presets_good.conf"));
         tmp << R"CFG(color_presets=default,high_contrast
 color_preset=default
 color_preset.default.name=Default
@@ -396,44 +490,44 @@ color_preset.high_contrast.tempo_color=255,255,255,255
 )CFG";
         tmp.close();
 
-        Config c = parse_for_test({"test", "--config", "/tmp/test_presets_good.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_presets_good.conf")});
         expect("presets_list_size", c.colorPresetNames.size() == 2);
         expect("presets_initial", c.initialColorPreset == "default");
         expect("presets_active_name", getActiveColorPresetName(c) == "default");
         expect("presets_tempo_default", c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
 
-        std::remove("/tmp/test_presets_good.conf");
+        std::remove(fixture("test_presets_good.conf").c_str());
     }
 
     {
         // Negative: unknown initial preset
-        std::ofstream tmp("/tmp/test_bad_initial_preset.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_initial_preset.conf"));
         tmp << R"CFG(color_presets=default
 color_preset=nonexistent
 )CFG";
         tmp.close();
 
-        int rc = run_child("bad_initial_preset", {"--config", "/tmp/test_bad_initial_preset.conf"});
+        int rc = run_child("bad_initial_preset", {"--config", fixture("test_bad_initial_preset.conf")});
         expect("bad_initial_preset_fails", rc != 0);
-        std::remove("/tmp/test_bad_initial_preset.conf");
+        std::remove(fixture("test_bad_initial_preset.conf").c_str());
     }
 
     {
         // Negative: non-color key inside preset (e.g. width)
-        std::ofstream tmp("/tmp/test_bad_preset_key.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_preset_key.conf"));
         tmp << R"CFG(color_presets=bad
 color_preset.bad.width=999
 )CFG";
         tmp.close();
 
-        int rc = run_child("bad_preset_noncolor_key", {"--config", "/tmp/test_bad_preset_key.conf"});
+        int rc = run_child("bad_preset_noncolor_key", {"--config", fixture("test_bad_preset_key.conf")});
         expect("bad_preset_noncolor_key_fails", rc != 0);
-        std::remove("/tmp/test_bad_preset_key.conf");
+        std::remove(fixture("test_bad_preset_key.conf").c_str());
     }
 
     {
         // Good: inheritance (only override some colors)
-        std::ofstream tmp("/tmp/test_preset_inherit.conf");
+        CheckedFixtureOutput tmp(fixture("test_preset_inherit.conf"));
         tmp << R"CFG(tempo_color=10,20,30,255
 color_presets=dim
 color_preset=dim
@@ -442,72 +536,72 @@ color_preset.dim.tempo_color=120,120,120,255
 )CFG";
         tmp.close();
 
-        Config c = parse_for_test({"test", "--config", "/tmp/test_preset_inherit.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_preset_inherit.conf")});
         expect("preset_inherit_tempo", c.tempoColor.r == 120 && c.tempoColor.g == 120 && c.tempoColor.b == 120);
 
-        std::remove("/tmp/test_preset_inherit.conf");
+        std::remove(fixture("test_preset_inherit.conf").c_str());
     }
 
     {
         // Negative: duplicate IDs in color_presets
-        std::ofstream tmp("/tmp/test_dup_ids.conf");
+        CheckedFixtureOutput tmp(fixture("test_dup_ids.conf"));
         tmp << R"CFG(color_presets=default,high_contrast,default
 color_preset=default
 )CFG";
         tmp.close();
-        int rc = run_child("dup_preset_ids", {"--config", "/tmp/test_dup_ids.conf"});
+        int rc = run_child("dup_preset_ids", {"--config", fixture("test_dup_ids.conf")});
         expect("dup_preset_ids_fails", rc != 0);
-        std::remove("/tmp/test_dup_ids.conf");
+        std::remove(fixture("test_dup_ids.conf").c_str());
     }
 
     {
         // Negative: listed-but-undefined preset (listed in color_presets but no .name and no color override)
-        std::ofstream tmp("/tmp/test_listed_undefined.conf");
+        CheckedFixtureOutput tmp(fixture("test_listed_undefined.conf"));
         tmp << R"CFG(color_presets=default,high_contrast
 color_preset=default
 color_preset.default.name=Default
 )CFG";
         tmp.close();
-        int rc = run_child("listed_but_undefined", {"--config", "/tmp/test_listed_undefined.conf"});
+        int rc = run_child("listed_but_undefined", {"--config", fixture("test_listed_undefined.conf")});
         expect("listed_but_undefined_fails", rc != 0);
-        std::remove("/tmp/test_listed_undefined.conf");
+        std::remove(fixture("test_listed_undefined.conf").c_str());
     }
 
     {
         // Negative: invalid preset ID with dot
-        std::ofstream tmp("/tmp/test_bad_id_dot.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_id_dot.conf"));
         tmp << R"CFG(color_presets=bad.id
 color_preset=bad.id
 )CFG";
         tmp.close();
-        int rc = run_child("bad_id_with_dot", {"--config", "/tmp/test_bad_id_dot.conf"});
+        int rc = run_child("bad_id_with_dot", {"--config", fixture("test_bad_id_dot.conf")});
         expect("bad_id_with_dot_fails", rc != 0);
-        std::remove("/tmp/test_bad_id_dot.conf");
+        std::remove(fixture("test_bad_id_dot.conf").c_str());
     }
 
     {
         // Negative: unknown subkey in preset
-        std::ofstream tmp("/tmp/test_bad_subkey.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_subkey.conf"));
         tmp << R"CFG(color_presets=foo
 color_preset.foo.name=foo
 color_preset.foo.width=123
 )CFG";
         tmp.close();
-        int rc = run_child("bad_subkey", {"--config", "/tmp/test_bad_subkey.conf"});
+        int rc = run_child("bad_subkey", {"--config", fixture("test_bad_subkey.conf")});
         expect("bad_subkey_fails", rc != 0);
-        std::remove("/tmp/test_bad_subkey.conf");
+        std::remove(fixture("test_bad_subkey.conf").c_str());
     }
 
     {
         // Negative: invalid color value in preset
-        std::ofstream tmp("/tmp/test_bad_color.conf");
+        CheckedFixtureOutput tmp(fixture("test_bad_color.conf"));
         tmp << R"CFG(color_presets=foo
 color_preset.foo.tempo_color=999,0,0,255
 )CFG";
         tmp.close();
-        int rc = run_child("bad_color_value", {"--config", "/tmp/test_bad_color.conf"});
+        int rc = run_child("bad_color_value", {"--config", fixture("test_bad_color.conf")});
         expect("bad_color_value_fails", rc != 0);
-        std::remove("/tmp/test_bad_color.conf");
+        std::remove(fixture("test_bad_color.conf").c_str());
     }
 
 
@@ -521,7 +615,7 @@ color_preset.foo.tempo_color=999,0,0,255
         expect("builtin_default_label", c.colorPresetLabels["default"] == "Default");
         expect("builtin_high_label", c.colorPresetLabels["high_contrast"] == "High Contrast");
         // default is label-only: preserves base colors
-        expect("builtin_default_preserves_base_tempo", c.tempoColor.r == 64 && c.tempoColor.g == 79 && c.tempoColor.b == 96);
+        expect("builtin_default_preserves_base_tempo", c.tempoColor.r == 84 && c.tempoColor.g == 89 && c.tempoColor.b == 166);
         // high_contrast has overrides
         expect("builtin_high_has_overrides", c.colorPresetOverrides.count("high_contrast") > 0 && c.colorPresetOverrides["high_contrast"].size() > 0);
     }
@@ -542,8 +636,8 @@ color_preset.foo.tempo_color=999,0,0,255
         cycleColorPreset(c);  // default -> high_contrast
         expect("cycle_high_overrides_tempo", c.tempoColor.r == 255 && c.tempoColor.g == 255 && c.tempoColor.b == 255);
         cycleColorPreset(c);  // high_contrast -> default
-        expect("cycle_default_restores_base_tempo", c.tempoColor.r == base_tempo_r && c.tempoColor.r == 64);
-        expect("cycle_default_restores_base_phase_marker", c.phaseMarkerColor.r == base_phase_r && c.phaseMarkerColor.r == 255);
+        expect("cycle_default_restores_base_tempo", c.tempoColor.r == base_tempo_r && c.tempoColor.r == 84);
+        expect("cycle_default_restores_base_phase_marker", c.phaseMarkerColor.r == base_phase_r && c.phaseMarkerColor.r == 125);
     }
 
     // Test with example config: high -> default restores example base
@@ -557,7 +651,7 @@ color_preset.foo.tempo_color=999,0,0,255
 
     // Test partial preset inherits from base after a previous preset was active
     {
-        std::ofstream tmp("/tmp/test_partial.conf");
+        CheckedFixtureOutput tmp(fixture("test_partial.conf"));
         tmp << R"CFG(color_presets=default,high_contrast,partial
 color_preset=default
 color_preset.default.name=Default
@@ -569,7 +663,7 @@ color_preset.partial.tempo_color=50,50,50,255
 )CFG";
         tmp.close();
 
-        Config c = parse_for_test({"test", "--config", "/tmp/test_partial.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_partial.conf")});
 
         cycleColorPreset(c);  // default -> high_contrast
         expect("partial_test_high_phase_marker", c.phaseMarkerColor.r == 0);
@@ -578,46 +672,46 @@ color_preset.partial.tempo_color=50,50,50,255
         expect("partial_after_cycle_tempo_override", c.tempoColor.r == 50);
 
         // other colors should be base, not previous high_contrast
-        expect("partial_inherits_base_phase", c.phaseMarkerColor.r == 255);
+        expect("partial_inherits_base_phase", c.phaseMarkerColor.r == 125);
 
-        std::remove("/tmp/test_partial.conf");
+        std::remove(fixture("test_partial.conf").c_str());
     }
 
     // config file with color_presets=custom replaces built-ins
     {
-        std::ofstream tmp("/tmp/test_custom_presets.conf");
+        CheckedFixtureOutput tmp(fixture("test_custom_presets.conf"));
         tmp << R"CFG(color_presets=custom
 color_preset=custom
 color_preset.custom.name=Custom
 color_preset.custom.tempo_color=100,100,100,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_custom_presets.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_custom_presets.conf")});
         expect("file_replaces_presets_count", c.colorPresetNames.size() == 1);
         expect("file_replaces_name", c.colorPresetNames[0] == "custom");
         expect("file_replaces_label", c.colorPresetLabels["custom"] == "Custom");
         expect("file_replaces_override", c.colorPresetOverrides.count("custom") > 0);
-        std::remove("/tmp/test_custom_presets.conf");
+        std::remove(fixture("test_custom_presets.conf").c_str());
     }
 
     // config file with no color_presets= keeps built-ins
     {
-        std::ofstream tmp("/tmp/test_no_presets_key.conf");
+        CheckedFixtureOutput tmp(fixture("test_no_presets_key.conf"));
         tmp << "width=640\n";  // some other key, no color_presets
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_no_presets_key.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_no_presets_key.conf")});
         expect("file_omits_presets_keeps_builtin", c.colorPresetNames.size() == 2 && c.colorPresetNames[0] == "default");
-        std::remove("/tmp/test_no_presets_key.conf");
+        std::remove(fixture("test_no_presets_key.conf").c_str());
     }
 
     // config file with color_presets= (empty) disables
     {
-        std::ofstream tmp("/tmp/test_empty_presets.conf");
+        CheckedFixtureOutput tmp(fixture("test_empty_presets.conf"));
         tmp << "color_presets=\n";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_empty_presets.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_empty_presets.conf")});
         expect("file_empty_presets_disables", c.colorPresetNames.empty());
-        std::remove("/tmp/test_empty_presets.conf");
+        std::remove(fixture("test_empty_presets.conf").c_str());
     }
 
 
@@ -633,7 +727,7 @@ color_preset.custom.tempo_color=100,100,100,255
 
     {
         // explicit config reload uses same path
-        std::ofstream tmp("/tmp/test_explicit_reload.conf");
+        CheckedFixtureOutput tmp(fixture("test_explicit_reload.conf"));
         tmp << R"CFG(color_presets=default,high_contrast
 color_preset=default
 color_preset.default.name=Default
@@ -641,12 +735,12 @@ color_preset.high_contrast.name=High Contrast
 color_preset.high_contrast.tempo_color=255,255,255,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_explicit_reload.conf"});
-        expect("explicit_path_set", c.startupConfigPath == "/tmp/test_explicit_reload.conf");
+        Config c = parse_for_test({"test", "--config", fixture("test_explicit_reload.conf")});
+        expect("explicit_path_set", c.startupConfigPath == fixture("test_explicit_reload.conf"));
         c.colorPresetNames.clear();
         bool ok = tryReloadConfig(c);
-        expect("reload_explicit_uses_same_path", ok && c.configPath == "/tmp/test_explicit_reload.conf");
-        std::remove("/tmp/test_explicit_reload.conf");
+        expect("reload_explicit_uses_same_path", ok && c.configPath == fixture("test_explicit_reload.conf"));
+        std::remove(fixture("test_explicit_reload.conf").c_str());
     }
 
     {
@@ -662,43 +756,43 @@ color_preset.high_contrast.tempo_color=255,255,255,255
         // CLI --width wins over config file; reload with conflicting file width keeps live 640
         // (CLI precedence + live window deferral), without fabricating unreachable live state.
         {
-            std::ofstream tmp("/tmp/test_reload_width.conf");
+            CheckedFixtureOutput tmp(fixture("test_reload_width.conf"));
             tmp << "width=480\n";
             tmp << "height=320\n";
             tmp.close();
         }
-        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_width.conf", "--width", "640"});
+        Config c = parse_for_test({"test", "--config", fixture("test_reload_width.conf"), "--width", "640"});
         expect("cli_width", c.width == 640);
         {
-            std::ofstream next("/tmp/test_reload_width.conf");
+            CheckedFixtureOutput next(fixture("test_reload_width.conf"));
             next << "width=800\n";
             next << "height=320\n";
             next.close();
         }
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_width", ok && c.width == 640);
-        std::remove("/tmp/test_reload_width.conf");
+        std::remove(fixture("test_reload_width.conf").c_str());
     }
 
     {
         // CLI --height wins; reload with conflicting file height keeps live 400.
         {
-            std::ofstream tmp("/tmp/test_reload_height.conf");
+            CheckedFixtureOutput tmp(fixture("test_reload_height.conf"));
             tmp << "width=480\n";
             tmp << "height=320\n";
             tmp.close();
         }
-        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_height.conf", "--height", "400"});
+        Config c = parse_for_test({"test", "--config", fixture("test_reload_height.conf"), "--height", "400"});
         expect("cli_height", c.height == 400);
         {
-            std::ofstream next("/tmp/test_reload_height.conf");
+            CheckedFixtureOutput next(fixture("test_reload_height.conf"));
             next << "width=480\n";
             next << "height=600\n";
             next.close();
         }
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_height", ok && c.height == 400);
-        std::remove("/tmp/test_reload_height.conf");
+        std::remove(fixture("test_reload_height.conf").c_str());
     }
 
     {
@@ -712,16 +806,16 @@ color_preset.high_contrast.tempo_color=255,255,255,255
     {
         // CLI --windowed wins over file fullscreen=true; reload keeps live windowed/false.
         {
-            std::ofstream tmp("/tmp/test_reload_windowed.conf");
+            CheckedFixtureOutput tmp(fixture("test_reload_windowed.conf"));
             tmp << "fullscreen=true\n";
             tmp << "width=480\n";
             tmp << "height=320\n";
             tmp.close();
         }
-        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_windowed.conf", "--windowed"});
+        Config c = parse_for_test({"test", "--config", fixture("test_reload_windowed.conf"), "--windowed"});
         expect("cli_windowed_reload", c.fullscreen == false);
         {
-            std::ofstream next("/tmp/test_reload_windowed.conf");
+            CheckedFixtureOutput next(fixture("test_reload_windowed.conf"));
             next << "fullscreen=true\n";
             next << "width=480\n";
             next << "height=320\n";
@@ -729,7 +823,7 @@ color_preset.high_contrast.tempo_color=255,255,255,255
         }
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_windowed", ok && c.fullscreen == false);
-        std::remove("/tmp/test_reload_windowed.conf");
+        std::remove(fixture("test_reload_windowed.conf").c_str());
     }
 
     {
@@ -774,19 +868,19 @@ color_preset.high_contrast.tempo_color=255,255,255,255
 
     {
         // missing explicit reload source: nonfatal, complete previous state remains
-        std::ofstream tmp("/tmp/test_valid_for_corrupt.conf");
+        CheckedFixtureOutput tmp(fixture("test_valid_for_corrupt.conf"));
         tmp << R"CFG(width=480
 height=320
 tempo_color=10,20,30,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_valid_for_corrupt.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_valid_for_corrupt.conf")});
         const int orig_width = c.width;
         const int orig_tempo_r = c.tempoColor.r;
         const std::string orig_path = c.startupConfigPath;
         const auto orig_cli = c.originalCliArgs;
         const int orig_preset_index = c.activeColorPresetIndex;
-        std::remove("/tmp/test_valid_for_corrupt.conf");
+        std::remove(fixture("test_valid_for_corrupt.conf").c_str());
         bool ok = tryReloadConfig(c);
         expect("missing_reload_returns_false", !ok);
         expect("missing_reload_keeps_width", c.width == orig_width);
@@ -795,19 +889,19 @@ tempo_color=10,20,30,255
         expect("missing_reload_keeps_cli_args", c.originalCliArgs == orig_cli);
         expect("missing_reload_keeps_preset_index", c.activeColorPresetIndex == orig_preset_index);
         expect("missing_reload_process_continues", true);  // reached after tryReloadConfig
-        std::remove("/tmp/test_valid_for_corrupt.conf");
+        std::remove(fixture("test_valid_for_corrupt.conf").c_str());
     }
 
     {
         // existing-but-invalid reload: invalid RGBA must return false in-process (no std::exit)
-        std::ofstream tmp("/tmp/test_invalid_existing_reload.conf");
+        CheckedFixtureOutput tmp(fixture("test_invalid_existing_reload.conf"));
         tmp << R"CFG(width=480
 height=320
 tempo_color=11,22,33,255
 status_font_size=30
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_invalid_existing_reload.conf", "--windowed"});
+        Config c = parse_for_test({"test", "--config", fixture("test_invalid_existing_reload.conf"), "--windowed"});
         const int orig_width = c.width;
         const int orig_tempo_r = c.tempoColor.r;
         const int orig_tempo_g = c.tempoColor.g;
@@ -820,7 +914,7 @@ status_font_size=30
         const int orig_active = c.activeColorPresetIndex;
 
         {
-            std::ofstream bad("/tmp/test_invalid_existing_reload.conf");
+            CheckedFixtureOutput bad(fixture("test_invalid_existing_reload.conf"));
             bad << "tempo_color=999,0,0,255\n";
             bad << "width=480\n";
             bad.close();
@@ -840,20 +934,20 @@ status_font_size=30
                c.baseTempoColor.r == orig_base_tempo.r && c.baseTempoColor.g == orig_base_tempo.g);
         expect("invalid_existing_reload_keeps_active_index", c.activeColorPresetIndex == orig_active);
         expect("invalid_existing_reload_process_continues", true);
-        std::remove("/tmp/test_invalid_existing_reload.conf");
+        std::remove(fixture("test_invalid_existing_reload.conf").c_str());
     }
 
     {
         // existing-but-invalid numeric value also nonfatal
-        std::ofstream tmp("/tmp/test_invalid_numeric_reload.conf");
+        CheckedFixtureOutput tmp(fixture("test_invalid_numeric_reload.conf"));
         tmp << "status_font_size=30\n";
         tmp << "tempo_color=1,2,3,255\n";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_invalid_numeric_reload.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_invalid_numeric_reload.conf")});
         const int orig_font = c.statusFontSize;
         const int orig_r = c.tempoColor.r;
         {
-            std::ofstream bad("/tmp/test_invalid_numeric_reload.conf");
+            CheckedFixtureOutput bad(fixture("test_invalid_numeric_reload.conf"));
             bad << "status_font_size=0\n";
             bad.close();
         }
@@ -862,12 +956,12 @@ status_font_size=30
         expect("invalid_numeric_reload_keeps_font", c.statusFontSize == orig_font);
         expect("invalid_numeric_reload_keeps_tempo", c.tempoColor.r == orig_r);
         expect("invalid_numeric_reload_process_continues", true);
-        std::remove("/tmp/test_invalid_numeric_reload.conf");
+        std::remove(fixture("test_invalid_numeric_reload.conf").c_str());
     }
 
     {
         // invalid preset content on reload: duplicate IDs -> nonfatal rollback
-        std::ofstream tmp("/tmp/test_invalid_preset_reload.conf");
+        CheckedFixtureOutput tmp(fixture("test_invalid_preset_reload.conf"));
         tmp << R"CFG(color_presets=default,high_contrast
 color_preset=default
 color_preset.default.name=Default
@@ -876,13 +970,13 @@ color_preset.high_contrast.tempo_color=9,8,7,255
 tempo_color=50,50,50,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_invalid_preset_reload.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_invalid_preset_reload.conf")});
         const int orig_tempo_r = c.tempoColor.r;
         const auto orig_names = c.colorPresetNames;
         const std::string orig_path = c.startupConfigPath;
         const auto orig_cli = c.originalCliArgs;
         {
-            std::ofstream bad("/tmp/test_invalid_preset_reload.conf");
+            CheckedFixtureOutput bad(fixture("test_invalid_preset_reload.conf"));
             bad << "color_presets=default,default\n";
             bad << "color_preset.default.name=Default\n";
             bad.close();
@@ -894,22 +988,22 @@ tempo_color=50,50,50,255
         expect("invalid_preset_reload_keeps_path", c.startupConfigPath == orig_path);
         expect("invalid_preset_reload_keeps_cli", c.originalCliArgs == orig_cli);
         expect("invalid_preset_reload_process_continues", true);
-        std::remove("/tmp/test_invalid_preset_reload.conf");
+        std::remove(fixture("test_invalid_preset_reload.conf").c_str());
     }
 
     {
         // invalid undefined listed preset on reload
-        std::ofstream tmp("/tmp/test_undefined_preset_reload.conf");
+        CheckedFixtureOutput tmp(fixture("test_undefined_preset_reload.conf"));
         tmp << R"CFG(color_presets=default
 color_preset=default
 color_preset.default.name=Default
 tempo_color=12,13,14,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_undefined_preset_reload.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_undefined_preset_reload.conf")});
         const int orig_r = c.tempoColor.r;
         {
-            std::ofstream bad("/tmp/test_undefined_preset_reload.conf");
+            CheckedFixtureOutput bad(fixture("test_undefined_preset_reload.conf"));
             bad << "color_presets=ghost\n";
             bad.close();
         }
@@ -917,23 +1011,23 @@ tempo_color=12,13,14,255
         expect("undefined_preset_reload_returns_false", !ok);
         expect("undefined_preset_reload_keeps_tempo", c.tempoColor.r == orig_r);
         expect("undefined_preset_reload_process_continues", true);
-        std::remove("/tmp/test_undefined_preset_reload.conf");
+        std::remove(fixture("test_undefined_preset_reload.conf").c_str());
     }
 
     {
         // live layout: deferred larger candidate width must not allow unusable margin
-        std::ofstream tmp("/tmp/test_margin_vs_live_width.conf");
+        CheckedFixtureOutput tmp(fixture("test_margin_vs_live_width.conf"));
         tmp << R"CFG(width=480
 height=320
 phase_bar_margin=24
 tempo_color=1,2,3,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_margin_vs_live_width.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_margin_vs_live_width.conf")});
         expect("margin_live_initial", c.width == 480 && c.phaseBarMargin == 24 && c.tempoColor.r == 1);
         {
             // Candidate width would make margin valid; live width remains 480 after deferral.
-            std::ofstream bad("/tmp/test_margin_vs_live_width.conf");
+            CheckedFixtureOutput bad(fixture("test_margin_vs_live_width.conf"));
             bad << "width=2000\n";
             bad << "phase_bar_margin=300\n";
             bad << "tempo_color=99,99,99,255\n";
@@ -945,23 +1039,23 @@ tempo_color=1,2,3,255
         expect("margin_vs_live_width_keeps_margin", c.phaseBarMargin == 24);
         expect("margin_vs_live_width_keeps_tempo", c.tempoColor.r == 1);
         expect("margin_vs_live_width_process_continues", true);
-        std::remove("/tmp/test_margin_vs_live_width.conf");
+        std::remove(fixture("test_margin_vs_live_width.conf").c_str());
     }
 
     {
         // window settings deferred: successful reload keeps live width/height/fullscreen
         // while applying safe color change; candidate window values are not stored as applied.
-        std::ofstream tmp("/tmp/test_window_defer.conf");
+        CheckedFixtureOutput tmp(fixture("test_window_defer.conf"));
         tmp << R"CFG(width=480
 height=320
 fullscreen=true
 tempo_color=10,20,30,255
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_window_defer.conf", "--windowed"});
+        Config c = parse_for_test({"test", "--config", fixture("test_window_defer.conf"), "--windowed"});
         expect("window_defer_cli_windowed", c.fullscreen == false && c.width == 480);
         {
-            std::ofstream next("/tmp/test_window_defer.conf");
+            CheckedFixtureOutput next(fixture("test_window_defer.conf"));
             next << "width=800\n";
             next << "height=600\n";
             next << "fullscreen=true\n";
@@ -974,35 +1068,35 @@ tempo_color=10,20,30,255
         expect("window_defer_keeps_live_height", c.height == 320);
         expect("window_defer_keeps_live_fullscreen", c.fullscreen == false);
         expect("window_defer_applies_color", c.tempoColor.r == 40 && c.tempoColor.g == 50 && c.tempoColor.b == 60);
-        std::remove("/tmp/test_window_defer.conf");
+        std::remove(fixture("test_window_defer.conf").c_str());
     }
 
     {
         // config-defined presets still override after reload
-        std::ofstream tmp("/tmp/test_reload_preset.conf");
+        CheckedFixtureOutput tmp(fixture("test_reload_preset.conf"));
         tmp << "color_presets=high_contrast\n";
         tmp << "color_preset=high_contrast\n";
         tmp << "color_preset.high_contrast.name=HC\n";
         tmp << "color_preset.high_contrast.tempo_color=1,2,3,255\n";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_preset.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_reload_preset.conf")});
         expect("preset_override_before", c.tempoColor.r == 1);
         bool ok = tryReloadConfig(c);
         expect("reload_preserves_preset_override", ok && c.tempoColor.r == 1);
-        std::remove("/tmp/test_reload_preset.conf");
+        std::remove(fixture("test_reload_preset.conf").c_str());
     }
 
     {
         // empty color_presets= still disables after reload
-        std::ofstream tmp("/tmp/test_reload_empty.conf");
+        CheckedFixtureOutput tmp(fixture("test_reload_empty.conf"));
         tmp << R"CFG(color_presets=
 )CFG";
         tmp.close();
-        Config c = parse_for_test({"test", "--config", "/tmp/test_reload_empty.conf"});
+        Config c = parse_for_test({"test", "--config", fixture("test_reload_empty.conf")});
         expect("empty_before", c.colorPresetNames.empty());
         bool ok = tryReloadConfig(c);
         expect("reload_empty_disables", ok && c.colorPresetNames.empty());
-        std::remove("/tmp/test_reload_empty.conf");
+        std::remove(fixture("test_reload_empty.conf").c_str());
     }
 
     {
@@ -1036,6 +1130,145 @@ tempo_color=10,20,30,255
         cycleColorPreset(c);
         expect("t2_p_after_reload_wrap_default", getActiveColorPresetName(c) == "default");
     }
+
+    // Compiled defaults, captured bases and file palette parity are distinct checks.
+    {
+        Config c = parse_for_test({"test"});
+        const auto palette = [](const Config& v) {
+            return rgbaEquals(v.statusInactiveColor, 100,44,48,255)
+                && rgbaEquals(v.statusNoPeersColor, 40,54,88,255)
+                && rgbaEquals(v.statusConnectedColor, 105,105,95,255)
+                && rgbaEquals(v.tempoColor, 84,89,166,255)
+                && rgbaEquals(v.phaseBarColor, 73,164,121,255)
+                && rgbaEquals(v.phaseMarkerColor, 125,205,25,255);
+        };
+        expect("compiled_six_color_palette", palette(c));
+        Config base = c;
+        restoreBaseColors(base);
+        expect("compiled_six_base_colors", palette(base));
+        Config example = parse_for_test({"test", "--config", "config/link-pi-display.example.conf"});
+        Config profile = parse_for_test({"test", "--config", "config/presets/480x320-landscape.conf"});
+        expect("defaults_example_profile_parity", palette(c) && palette(example) && palette(profile)
+               && c.fontPath == example.fontPath && c.fontPath == profile.fontPath);
+        cycleColorPreset(c);
+        expect("no_file_R_restores_initial_default", tryReloadConfig(c) && palette(c)
+               && getActiveColorPresetName(c) == "default" && c.startupConfigPath.empty());
+        writeFixture("sparse.conf", "tempo_color=11,22,33,255\n");
+        Config sparse = parse_for_test({"test", "--config", fixture("sparse.conf")});
+        expect("sparse_file_still_authoritative", rgbaEquals(sparse.tempoColor,11,22,33,255)
+               && rgbaEquals(sparse.statusInactiveColor,100,44,48,255));
+    }
+    {
+        const auto saved = fs::current_path();
+        const auto isolated = fs::path(fixture("implicit-cwd"));
+        fs::create_directory(isolated);
+        fs::current_path(isolated);
+        Config nofile = parse_for_test({"test", "--tempo", "133"});
+        expect("isolated_no_file_source_empty", nofile.startupConfigPath.empty());
+        fs::create_directory("config");
+        writeFixtureAt("config/link-pi-display.conf", "tempo_color=12,34,56,255\n");
+        expect("late_file_not_adopted_by_R", tryReloadConfig(nofile)
+               && nofile.startupConfigPath.empty() && nofile.tempoColor.r == 84 && nofile.initialTempo == 133);
+        Config implicit = parse_for_test({"test"});
+        expect("implicit_cwd_file_loaded", implicit.startupConfigPath == "config/link-pi-display.conf"
+               && implicit.tempoColor.r == 12);
+        writeFixtureAt("config/link-pi-display.conf", "tempo_color=98,76,54,255\n");
+        expect("implicit_original_source_R", tryReloadConfig(implicit) && implicit.tempoColor.r == 98);
+        fs::current_path(saved);
+    }
+    const std::vector<std::string> keys = {"status_font_path", "tempo_font_path", "bottom_font_path", "help_font_path"};
+    const auto roles = [](const Config& c) {
+        return std::vector<std::string>{c.statusFontPath,c.tempoFontPath,c.bottomFontPath,c.helpFontPath};
+    };
+    {
+        Config c = parse_for_test({"test"});
+        expect("discovery_all_role_inheritance", roles(c) == std::vector<std::string>(4,c.fontPath)
+               && c.fontPath == findDefaultFontPath());
+        writeFixture("fonts.conf", "font_path=general literal.ttf\n");
+        c = parse_for_test({"test", "--config", fixture("fonts.conf")});
+        expect("general_all_role_inheritance", roles(c) == std::vector<std::string>(4,"general literal.ttf"));
+    }
+    for (size_t i = 0; i < keys.size(); ++i) {
+        writeFixture("fonts.conf", keys[i] + "=role.ttf\nfont_path=general.ttf\n");
+        Config c = parse_for_test({"test", "--config", fixture("fonts.conf")});
+        auto expected = std::vector<std::string>(4,"general.ttf");
+        expected[i] = "role.ttf";
+        expect(keys[i] + "_independent_override", roles(c) == expected);
+        writeFixture("fonts.conf", keys[i] + "=role.ttf\n");
+        c = parse_for_test({"test", "--config", fixture("fonts.conf")});
+        expected = std::vector<std::string>(4,c.fontPath);
+        expected[i] = "role.ttf";
+        expect(keys[i] + "_omitted_general_discovery", roles(c) == expected);
+    }
+    for (int reverse = 0; reverse < 2; ++reverse) {
+        std::string content = reverse ? "font_path=general.ttf\n" : "";
+        for (int j = 0; j < 4; ++j) {
+            const int i = reverse ? 3-j : j;
+            content += keys[i] + "=role" + std::to_string(i) + ".ttf\n";
+        }
+        if (!reverse) content += "font_path=general.ttf\n";
+        writeFixture("fonts.conf", content);
+        Config c = parse_for_test({"test", "--config", fixture("fonts.conf")});
+        expect("distinct_roles_order_" + std::to_string(reverse), roles(c)
+               == std::vector<std::string>({"role0.ttf","role1.ttf","role2.ttf","role3.ttf"}));
+        const std::string literal = " global font ' literal.ttf ";
+        c = parse_for_test({"test", "--font", literal, "--config", fixture("fonts.conf")});
+        expect("global_dominates_roles_literal_preserved_" + std::to_string(reverse),
+               c.fontPath == literal && roles(c) == std::vector<std::string>(4,literal));
+        writeFixture("fonts.conf", "font_path=changed.ttf\nstatus_font_path=changed-role.ttf\n");
+        expect("original_global_replayed_twice_" + std::to_string(reverse), tryReloadConfig(c)
+               && tryReloadConfig(c) && roles(c) == std::vector<std::string>(4,literal));
+    }
+    {
+        writeFixture("fonts.conf", "font_path=base.ttf\nstatus_font_path=role.ttf\n");
+        Config c = parse_for_test({"test", "--config", fixture("fonts.conf")});
+        writeFixture("fonts.conf", "font_path=new-base.ttf\n");
+        expect("role_removal_fresh_inheritance", tryReloadConfig(c)
+               && roles(c) == std::vector<std::string>(4,"new-base.ttf"));
+        std::ostringstream output;
+        auto* old = std::cout.rdbuf(output.rdbuf());
+        printEffectiveConfig(c);
+        std::cout.rdbuf(old);
+        const std::string fields = "font_path=new-base.ttf\nstatus_font_path=new-base.ttf\n"
+            "tempo_font_path=new-base.ttf\nbottom_font_path=new-base.ttf\nhelp_font_path=new-base.ttf\n";
+        expect("effective_five_paths_order", output.str().find(fields) != std::string::npos);
+        expect("role_sizes_independent", c.statusFontSize==30 && c.tempoFontSize==110
+               && c.bottomFontSize==25 && c.helpFontSize==20);
+    }
+    expect("argv_child_success_control", run_child("success", {"--font", " literal ' font.ttf ", "--width", "640"}) == 0);
+    expect("argv_empty_font_rejected", run_child("empty-font", {"--font", ""}) == 1);
+    expect("argv_blank_font_rejected", run_child("blank-font", {"--font", " \t "}) == 1);
+    expect("argv_masked_empty_font_rejected", run_child("masked-font", {"--font", "", "--font", "valid.ttf"}) == 1);
+    auto allKeys = keys;
+    allKeys.insert(allKeys.begin(), "font_path");
+    for (const auto& key : allKeys) {
+        for (const auto& blank : std::vector<std::string>{"", " \t "}) {
+            writeFixture("empty-font.conf", key + "=" + blank + "\n" + key + "=later.ttf\n");
+            expect(key + "_masked_blank_fatal_" + std::to_string(blank.size()),
+                   run_child("blank-file", {"--config", fixture("empty-font.conf"), "--font", "global.ttf"}) == 1);
+            writeFixture("reload-font.conf", "font_path=working.ttf\n");
+            Config c = parse_for_test({"test", "--config", fixture("reload-font.conf"), "--font", "global.ttf"});
+            cycleColorPreset(c);
+            const Config previous = c;
+            writeFixture("reload-font.conf", "tempo_color=1,2,3,255\n" + key + "=" + blank + "\n");
+            expect(key + "_blank_R_rolls_back_" + std::to_string(blank.size()), !tryReloadConfig(c)
+                   && roles(c) == roles(previous) && c.tempoColor.r == previous.tempoColor.r
+                   && c.baseTempoColor.r == previous.baseTempoColor.r
+                   && c.originalCliArgs == previous.originalCliArgs
+                   && c.startupConfigPath == previous.startupConfigPath
+                   && c.activeColorPresetIndex == previous.activeColorPresetIndex);
+        }
+    }
+    // Nonempty paths are parser data, not claims that SDL_ttf can open them.
+    for (const auto& raw : std::vector<std::string>{"missing.ttf", ".", "not-a-font.txt", "relative font.ttf"}) {
+        writeFixture("raw-font.conf", "font_path=" + raw + "\n");
+        Config c = parse_for_test({"test", "--config", fixture("raw-font.conf")});
+        expect("nonempty_raw_path_preserved_" + raw, roles(c) == std::vector<std::string>(4,raw));
+    }
+    // Preserve the literal escaped-\\n regression: it is not a second LF assignment.
+    writeFixture("escaped-newline.conf", "color_presets=one\\ncolor_preset.one.name=One\n");
+    expect("literal_escaped_newline_not_new_assignment",
+           run_child("escaped-newline", {"--config", fixture("escaped-newline.conf")}) == 1);
 
     if (failures == 0)
     {

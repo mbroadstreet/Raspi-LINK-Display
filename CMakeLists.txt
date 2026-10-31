@@ -73,3 +73,10 @@ target_compile_options(config_parser_tests
         -Wextra
         -Wpedantic
 )
+
+# Linux syscall fixture harness. Run with an existing private fixture parent:
+# runtime_instance_guard_tests /absolute/private/task-owned/root
+# This target does not link SDL/Link and cannot select a production lease path.
+add_executable(runtime_instance_guard_tests tests/runtime_instance_guard_tests.cpp)
+target_include_directories(runtime_instance_guard_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_options(runtime_instance_guard_tests PRIVATE -Wall -Wextra -Wpedantic)

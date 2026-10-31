@@ -3,7 +3,7 @@
 ## Current Status
 - v0.4 is Pi-validated and released.
 - Validated at commit `a79db44` (tag/branch `v0.4-pi-validated`).
-- The repository is a clean, standalone Ableton Link display module.
+- The repository is a standalone Ableton Link display module; working-tree/release state must be checked separately.
 
 ## Guiding Principles
 - This repository must remain a standalone, buildable, manually-startable module.
@@ -64,4 +64,12 @@ These features are intended to be additive and should not affect launch-time beh
 - Ticket 2 color presets + P cycle key are complete.
 - Ticket 3 R reload is complete and Pi-validated.
 - Ticket 4 runtime/config/test implementation at `ace2a7f` is owner/Pi-validated. This documentation records that result without asserting current branch publication, merge, tag, or release status; determine those states from repository refs and release records.
-- Ticket 5 font specification remains separate and has not started.
+- The bounded Ticket 5 role-font contract is included in the current `v0.7-defaults-fonts-desktop-launch` work candidate, together with compiled palette promotion and local/SSH launch documentation. This is not a new release or completed runtime-validation claim.
+
+## Current defaults/fonts/manual-launch candidate
+
+- Promote the six active example colors to compiled defaults; preserve sparse file/CLI/preset layering and implicit CWD config lookup.
+- Add optional role file paths with global `--font` dominance, strict supplied-empty rejection, effective inspection and all-four font ownership/rollback. No role CLI, chooser, font download or dependency expansion.
+- Retain the reviewed V3 manual existing-X11 launcher and its explicit 480×320 profile. Reversible stable helper/settings installation and verified-stopped V2 record retirement are gated by actual candidate tests and independent review.
+- Native font tests, real GUI/local/SSH lifecycle evidence, final stopped-state readback and selected-font readability remain acceptance gates, not implied PASS. See `docs/TEST-PLAN.md` and `docs/DESKTOP-LAUNCH-VALIDATION.md`.
+- CMake/module version `0.4`, historical release facts, Link behavior and deferred module/container work remain unchanged.

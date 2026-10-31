@@ -10,7 +10,7 @@ Ticket 4 supplies three ordinary, sparse configuration files under `config/prese
 | `480x320-high-contrast.conf` | 480×320 fullscreen | 30/110/25/20 | 22/6/24 | built-in `high_contrast` (explicit) |
 | `320x240-landscape.conf` | 320×240 fullscreen | 22/80/18/16 | 16/4/16 | built-in `default` (implicit) |
 
-Each file keeps those window, font-size, and phase-layout values active because they define the named screen profile. Unrelated settings—including band/help colors, help timeout, cursor preference, tempo, quantum, and `font_path`—are omitted and inherited from compiled defaults.
+Each file keeps those window, font-size, and phase-layout values active because they define the named screen profile. Unrelated settings—including band/help colors, help timeout, cursor preference, tempo, quantum, general and role font paths—are omitted and inherited from compiled defaults/discovery.
 
 Launch examples:
 
@@ -26,20 +26,22 @@ Use `--windowed` for inspection while retaining the selected file's configured d
 ./build/link-pi-display --config config/presets/320x240-landscape.conf --windowed
 ```
 
-## Sparse file-only palette
+## Sparse base palette matching compiled defaults
 
-Starting without a config retains the six dim compiled colors:
+The current candidate promotes the example palette to genuine no-file compiled defaults:
 
-| Color | No-config compiled value | File-loaded default value |
-|---|---|---|
-| Inactive status | `40,44,48,255` | `100,44,48,255` |
-| No-peers status | `40,44,48,255` | `40,54,88,255` |
-| Connected status | `75,85,95,255` | `105,105,95,255` |
-| Tempo | `64,79,96,255` | `84,89,166,255` |
-| Phase bar | `83,114,151,255` | `73,164,121,255` |
-| Phase marker | `255,255,255,255` | `125,205,25,255` |
+| Color | Compiled and explicit file base value |
+|---|---|
+| Inactive status | `100,44,48,255` |
+| No-peers status | `40,54,88,255` |
+| Connected status | `105,105,95,255` |
+| Tempo | `84,89,166,255` |
+| Phase bar | `73,164,121,255` |
+| Phase marker | `125,205,25,255` |
 
-All three files actively set exactly the file-loaded values above. They omit `color_presets=` and all dot definitions, so the built-in order `default,high_contrast`, labels, label-only default semantics, and unchanged high-contrast overrides remain available.
+No `--config` still checks CWD-relative `config/link-pi-display.conf`; a true no-file check uses an isolated CWD with the absolute binary. The managed helper always passes an explicit profile, normally `480x320-landscape.conf`, even though its base colors match compiled defaults.
+
+All three files retain exactly these six active base assignments. They omit `color_presets=` and all dot definitions, so the built-in order `default,high_contrast`, labels, label-only default semantics, and unchanged high-contrast overrides remain available.
 
 The high-contrast launch file carries the same six base overrides before selecting `color_preset=high_contrast`. Pressing P therefore returns to built-in `default` and reveals the same file-loaded palette as the other two files; another P wraps to unchanged built-in high contrast.
 
@@ -56,8 +58,10 @@ An active `color_presets=` in a custom file replaces the built-in list and requi
 
 ## Font portability
 
-The supplied files omit `font_path`. The application may discover an installed system font, or the operator may provide a host-specific path with `--font PATH`. Font specification work is reserved for Ticket 5; no font feature is part of this follow-up.
+The supplied files have no active general or role font path. Commented examples are operator-provided literal paths, not bundled assets or machine-specific defaults. Global `--font PATH` overrides every role; otherwise each role inherits its file override, general `font_path`, or existing discovery. The bottom font is opened/owned but has no visible text in the phase-only band. Empty supplied paths, CWD-relative semantics, all-four R rollback and glyph/readability limits are specified in [Runtime Config](RUNTIME-CONFIG.md#font-paths-and-portability).
 
 ## Validation and closeout status
+
+The current defaults/role-font candidate needs new execution evidence; the following is historical Ticket 4 evidence, including its then-different no-file palette. It does not certify current fonts or installed launch commands.
 
 The owner reports that the complete targeted Raspberry Pi validation passed for the Ticket 4 runtime/config/test implementation at `ace2a7f`, including no-config/file-default/high-contrast behavior, P/R behavior, invalid-R rollback, F1 alignment, fullscreen/windowed and cursor behavior, and 320×240 rendering. This documentation-only closeout records inherited validation results and does not represent a new runtime or Raspberry Pi test run. Branch publication, merge, tag, and release status must be determined from repository refs and release records.

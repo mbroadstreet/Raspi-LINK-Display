@@ -56,6 +56,26 @@ struct ParseFailurePolicyGuard {
     std::exit(1);
 }
 
+// Validate supplied paths, but retain every meaningful character of a nonempty CLI path.
+static std::string suppliedFontPath(const std::string& value, const std::string& context)
+{
+    if (trim(value).empty())
+        failConfig("Error: " + context + " requires a non-empty font path");
+    return value;
+}
+
+// Called only on fresh startup/reload configs, never on previously resolved role strings.
+static void resolveRoleFontPaths(Config& config, bool globalFontSupplied)
+{
+    const auto resolve = [&](std::string& path) {
+        if (globalFontSupplied || path.empty()) path = config.fontPath;
+    };
+    resolve(config.statusFontPath);
+    resolve(config.tempoFontPath);
+    resolve(config.bottomFontPath);
+    resolve(config.helpFontPath);
+}
+
 // --- Strict whole-string numeric conversion helpers ---
 static int strictStoi(const std::string& s, const std::string& key, const std::string& path, int lineNumber) {
     std::string t = trim(s);
@@ -267,10 +287,10 @@ void printUsage(const char* argv0)
         << "  --windowed                Run in a window instead of fullscreen.\n"
         << "  --width N                 Window/layout width.\n"
         << "  --height N                Window/layout height.\n"
-        << "  --font PATH               TTF font path.\n"
+        << "  --font PATH               Global TTF path (overrides all file font roles).\n"
         << "  --tempo BPM               Initial tempo before joining a session.\n"
         << "  --quantum BEATS           Phase quantum.\n"
-        << "  --config PATH             Path to config file.\n"
+        << "  --config PATH             Config file (otherwise CWD config/link-pi-display.conf).\n"
         << "  --print-config            Print effective configuration and exit.\n"
         << "  --module-info             Print module metadata and exit.\n"
         << "  --help                    Show this help.\n";
@@ -410,7 +430,11 @@ static void loadConfigFile(Config& config, const std::string& path, int& errorCo
             if      (key == "width")                     config.width = parsePositiveInt(value, key, path, lineNumber);
             else if (key == "height")                    config.height = parsePositiveInt(value, key, path, lineNumber);
             else if (key == "fullscreen")                config.fullscreen = parseBool(value, key, path, lineNumber);
-            else if (key == "font_path")                 config.fontPath = value;
+            else if (key == "font_path")                 config.fontPath = suppliedFontPath(value, key + " in " + path + ":" + std::to_string(lineNumber));
+            else if (key == "status_font_path")          config.statusFontPath = suppliedFontPath(value, key + " in " + path + ":" + std::to_string(lineNumber));
+            else if (key == "tempo_font_path")           config.tempoFontPath = suppliedFontPath(value, key + " in " + path + ":" + std::to_string(lineNumber));
+            else if (key == "bottom_font_path")          config.bottomFontPath = suppliedFontPath(value, key + " in " + path + ":" + std::to_string(lineNumber));
+            else if (key == "help_font_path")            config.helpFontPath = suppliedFontPath(value, key + " in " + path + ":" + std::to_string(lineNumber));
             else if (key == "status_font_size")          config.statusFontSize = parsePositiveInt(value, key, path, lineNumber);
             else if (key == "tempo_font_size")           config.tempoFontSize = parsePositiveInt(value, key, path, lineNumber);
             else if (key == "bottom_font_size")          config.bottomFontSize = parsePositiveInt(value, key, path, lineNumber);
@@ -576,6 +600,7 @@ static std::string getRequiredCliValue(int& i, int argc, char** argv, const std:
 Config parseConfig(int argc, char** argv)
 {
     Config config;
+    bool globalFontSupplied = false;
     for (int i = 1; i < argc; ++i) {
         config.originalCliArgs.push_back(argv[i]);
     }
@@ -687,7 +712,8 @@ Config parseConfig(int argc, char** argv)
         }
         else if (arg == "--font")
         {
-            config.fontPath = getRequiredCliValue(i, argc, argv, "--font");
+            config.fontPath = suppliedFontPath(getRequiredCliValue(i, argc, argv, "--font"), "--font");
+            globalFontSupplied = true;
         }
         else if (arg == "--tempo")
         {
@@ -706,6 +732,8 @@ Config parseConfig(int argc, char** argv)
             failConfig("Error: Unknown option: " + arg);
         }
     }
+
+    resolveRoleFontPaths(config, globalFontSupplied);
 
     // v0.6: Validate every listed preset has at least one definition (.name or color key)
     for (const auto& id : config.colorPresetNames)
@@ -759,6 +787,10 @@ void printEffectiveConfig(const Config& config)
         << "tempo=" << std::fixed << std::setprecision(2) << config.initialTempo << std::endl
         << "quantum=" << std::fixed << std::setprecision(2) << config.quantum << std::endl
         << "font_path=" << config.fontPath << std::endl
+        << "status_font_path=" << config.statusFontPath << std::endl
+        << "tempo_font_path=" << config.tempoFontPath << std::endl
+        << "bottom_font_path=" << config.bottomFontPath << std::endl
+        << "help_font_path=" << config.helpFontPath << std::endl
         << "status_font_size=" << config.statusFontSize << std::endl
         << "tempo_font_size=" << config.tempoFontSize << std::endl
         << "bottom_font_size=" << config.bottomFontSize << std::endl
@@ -818,6 +850,7 @@ bool tryReloadConfig(Config& config) {
     ParseFailurePolicyGuard policyGuard(ParseFailurePolicy::ThrowError);
     try {
         Config fresh;
+        bool globalFontSupplied = false;
         fresh.fontPath = findDefaultFontPath();
         fresh.originalCliArgs = previous.originalCliArgs;
 
@@ -876,7 +909,8 @@ bool tryReloadConfig(Config& config) {
             } else if (arg == "--font") {
                 if (i + 1 >= previous.originalCliArgs.size())
                     failConfig("Error: --font requires a value");
-                fresh.fontPath = previous.originalCliArgs[++i];
+                fresh.fontPath = suppliedFontPath(previous.originalCliArgs[++i], "--font");
+                globalFontSupplied = true;
             } else if (arg == "--tempo") {
                 if (i + 1 >= previous.originalCliArgs.size())
                     failConfig("Error: --tempo requires a value");
@@ -890,6 +924,8 @@ bool tryReloadConfig(Config& config) {
                     ++i;
             }
         }
+
+        resolveRoleFontPaths(fresh, globalFontSupplied);
 
         // Alias fallback (same as startup)
         if (fresh.backgroundColorExplicit && !fresh.centerBandColorExplicit) {
