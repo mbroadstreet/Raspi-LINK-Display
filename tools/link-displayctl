@@ -448,9 +448,9 @@ def load_settings(path, required=False):
 
 def make_spec(args, settings, previous=None):
     base = settings if args.settings is not None else (previous or settings)
-    root = Path(args.project or base.get("project") or Path(__file__).resolve().parent.parent).expanduser().resolve()
-    binary = Path(args.binary or base.get("binary") or root / "build/link-pi-display").expanduser().resolve()
-    config = Path(args.config or base.get("config") or root / "config/presets/480x320-landscape.conf").expanduser().resolve()
+    root = Path(args.project or base.get("project") or BOUNDED_RELEASE_ROOT).expanduser().resolve()
+    binary = Path(args.binary or base.get("binary") or root / "bin/link-pi-display").expanduser().resolve()
+    config = Path(args.config or base.get("config") or root / "config/profile.conf").expanduser().resolve()
     return {"project": str(root), "binary": str(binary), "config": str(config), "windowed": args.windowed if args.windowed is not None else bool(base.get("windowed", False))}
 
 
@@ -589,9 +589,10 @@ class ProcessDiscovery(list):
 
 # Diagnostic-only reviewed invocation proof. NEVER consumed by control policy.
 BOUNDED_ELF = 'b8d48bc0a4609fa0ca77313094ccd3e45d1f661faefecc5edc8c3550490bc048'
-BOUNDED_BUILD_ROOT = '/home/pi/projects/link-desktop-native-readiness01-e7960860ee745b8da442c2f4b5ec564a'
+BOUNDED_AS_BUILT_ROOT = '/home/pi/projects/link-desktop-native-readiness01-e7960860ee745b8da442c2f4b5ec564a'
 BOUNDED_SELECTION_SHA = 'a9bacdcb69f13bb53aaf0ccd11559022fb19cdf5a2d5ddda548b088eb23b133a'
 BOUNDED_RECEIPT_SHA = '35c5f3e228d6c80c7aa09baa23d3bec65cdba99cecdc5d6cd2589b37e17bca32'
+BOUNDED_RELEASE_ROOT = Path(__file__).resolve().parent.parent
 BOUNDED_PROFILE = 'native-proof-binding01-bullseye-x11'
 BOUNDED_MAX = 16384
 
@@ -634,7 +635,7 @@ def bounded_validate_build(selection_raw, receipt_raw):
             or hashlib.sha256(receipt_raw).hexdigest() != BOUNDED_RECEIPT_SHA):
         raise ValueError('Unaccepted selected-build evidence')
     m = json.loads(selection_raw); r = json.loads(receipt_raw)
-    root = BOUNDED_BUILD_ROOT
+    root = BOUNDED_AS_BUILT_ROOT
     expected = {n:v['sha256'] for n,v in m['product_files'].items()}
     expected.update({m['dependency_relative']+'/'+n:v['sha256'] for n,v in m['dependencies'].items()})
     if (m['root'] != root or m['candidate'] != 'frozen-private-D9-session03'
@@ -650,8 +651,7 @@ def bounded_validate_build(selection_raw, receipt_raw):
             or r['configure_argv'] != ['/usr/bin/cmake','-S',r['source'],'-B',r['build'],'-DLINK_ROOT='+r['dependency']]+m['configure_suffix']
             or r['build_argv'] != ['/usr/bin/cmake','--build',r['build']]+m['build_suffix']):
         raise ValueError('Invalid selected native build association')
-    return (r['binary']['sha256'], BOUNDED_SELECTION_SHA, BOUNDED_RECEIPT_SHA,
-            r['build']+'/link-pi-display', r['source'], root+'/profile.conf')
+    return (r['binary']['sha256'], BOUNDED_SELECTION_SHA, BOUNDED_RECEIPT_SHA)
 
 
 def bounded_build_evidence(deadline=None):
@@ -659,7 +659,7 @@ def bounded_build_evidence(deadline=None):
     if deadline is None:
         deadline = time.monotonic()+1
     values = []
-    with bounded_directory(Path(BOUNDED_BUILD_ROOT)/'evidence') as directory:
+    with bounded_directory(BOUNDED_RELEASE_ROOT/'provenance') as directory:
         for name in ('BUILD-SELECTION.json','native-build-success.json'):
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=directory)
             try:
@@ -671,9 +671,10 @@ def bounded_build_evidence(deadline=None):
                 values.append(raw)
             finally:
                 os.close(fd)
-    selected = bounded_validate_build(*values)
+    identity = bounded_validate_build(*values)
+    root = BOUNDED_RELEASE_ROOT
     bounded_remaining(deadline)
-    return selected
+    return identity + (str(root/'bin/link-pi-display'), str(root), str(root/'config/profile.conf'))
 
 
 def bounded_build_binding(selected):

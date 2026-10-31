@@ -154,6 +154,7 @@ cmake --build build --target config_parser_tests -j"$(nproc)"
 - [Runtime Configuration](docs/RUNTIME-CONFIG.md)
 - [Screen Preset Configurations](docs/SCREEN-PRESETS.md)
 - [SSH / Existing-Desktop Launcher](docs/DESKTOP-LAUNCH.md)
+- [Accepted PiTouch canonical release 0.4.0-desktop.1](docs/CANONICAL-RELEASE-0.4.0-desktop.1.md)
 - Example config: `config/link-pi-display.example.conf`
 
 ## License

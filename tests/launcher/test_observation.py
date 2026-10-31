@@ -481,14 +481,18 @@ class BoundedObservationTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parent / 'fixtures' / 'pitouch-build'
         cls.selection_raw = (fixture / 'BUILD-SELECTION.json').read_bytes()
         cls.receipt_raw = (fixture / 'native-build-success.json').read_bytes()
-        cls.accepted = cls.m.bounded_validate_build(cls.selection_raw, cls.receipt_raw)
+        root = cls.m.BOUNDED_RELEASE_ROOT
+        cls.accepted = cls.m.bounded_validate_build(cls.selection_raw, cls.receipt_raw) + (
+            str(root / 'bin/link-pi-display'), str(root), str(root / 'config/profile.conf'))
 
     def setUp(self):
         test_launcher.LauncherTests.setUp(self)
         def evidence(deadline=None):
             if deadline is not None:
                 self.m.bounded_remaining(deadline)
-            return self.m.bounded_validate_build(self.selection_raw, self.receipt_raw)
+            root = self.m.BOUNDED_RELEASE_ROOT
+            return self.m.bounded_validate_build(self.selection_raw, self.receipt_raw) + (
+                str(root / 'bin/link-pi-display'), str(root), str(root / 'config/profile.conf'))
         # Replace unavailable native-path acquisition, not hash/schema/selection validation.
         acquisition = patch.object(self.m, 'bounded_build_evidence', side_effect=evidence)
         acquisition.start()
